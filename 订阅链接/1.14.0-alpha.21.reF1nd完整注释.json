@@ -1,0 +1,1482 @@
+{
+  // ============================================================
+  // sing-box 1.14.0-alpha.21.reF1nd 配置文件 - 全版本整合版
+  // ============================================================
+  // 
+  // 包含以下四个版本的完整配置及注释：
+  // 1. 本地文件版 (local) - 使用本地 provider 节点
+  // 2. 订阅链接版 (remote) - 使用远程订阅 provider 节点 [基础版本]
+  // 3. 优化版 (optimized) - 增强规则集和出站管理
+  // 4. 修复版 (fixed) - DNS 和路由逻辑修复
+  //
+  // 【版本差异速览】
+  // ┌─────────────────────┬──────────┬──────────┬──────────┬──────────┐
+  // │ 差异项              │ 本地文件 │ 订阅链接 │ 优化版   │ 修复版   │
+  // ├─────────────────────┼──────────┼──────────┼──────────┼──────────┤
+  // │ 节点来源            │ 本地文件 │ 远程订阅 │ 远程订阅 │ 远程订阅 │
+  // │ 代理组标签          │ CATCH_ALL│ CATCH_ALL│ sing-box │ sing-box │
+  // │ 出站策略            │ 基础     │ 基础     │ 精细     │ 精细     │
+  // │ 规则集数量          │ 14       │ 14       │ 23       │ 23       │
+  // │ DNS 去广告          │ 弱       │ 弱       │ 强       │ 强       │
+  // │ FakeIP 分离         │ 否       │ 否       │ 是       │ 否(修复) │
+  // │ 最终出站            │ CATCH_ALL│ CATCH_ALL│ FINAL    │ FINAL    │
+  // │ DNS 最终            │ proxy    │ proxy    │ proxy    │ adguard  │
+  // └─────────────────────┴──────────┴──────────┴──────────┴──────────┘
+
+  // ============================================================
+  // 第一部分：日志配置 (log)
+  // 四个版本完全相同
+  // ============================================================
+  "log": {
+    "level": "trace",           // 日志级别：trace(最详细) > debug > info > warn > error > fatal > panic
+                                // trace 会记录所有连接细节，适合调试，生产环境建议改为 info 或 warn
+    "output": "/dev/null",      // 日志输出路径：/dev/null 表示丢弃所有日志（不记录）
+                                // 如需查看日志，可改为 "./sing-box.log" 或留空输出到控制台
+    "timestamp": true           // 是否在日志中添加时间戳
+  },
+
+  // ============================================================
+  // 第二部分：DNS 配置 (dns)
+  // 这是核心模块，负责域名解析的策略分流
+  // ============================================================
+  "dns": {
+    // ----------------------------------------------------------
+    // DNS 服务器定义
+    // ----------------------------------------------------------
+    "servers": [
+      // --- hosts 类型服务器：本地静态域名解析 ---
+      // 四个版本完全相同
+      {
+        "type": "hosts",                    // hosts 类型：类似系统 /etc/hosts 文件
+        "tag": "dns_hosts",                 // 标签名，供其他配置引用
+        "predefined": {                     // 预定义的静态域名-IP映射表
+          // ---------- Google FCM 推送服务域名 ----------
+          // 这些是 Android GCM/FCM 推送服务的关键域名
+          // 包含主域名和 alt1-alt8 备用域名
+          // 同时提供 IPv6 (2404:/2607:/2a00:开头) 和 IPv4 地址
+          "mtalk.google.com": [
+            "2404:6800:4008:c07::bc",       // IPv6 地址 (亚洲区域)
+            "2404:6800:4008:c1b::bc",
+            "2404:6800:4008:c15::bc",
+            "2404:6800:4008:c05::bc",
+            "2404:6800:4008:c19::bc",
+            "2404:6800:4008:c01::bc",
+            "2607:f8b0:4023:1c05::bc",      // IPv6 地址 (美洲区域)
+            "2607:f8b0:400e:c09::bc",
+            "142.250.107.188",              // IPv4 地址
+            "142.251.170.188",
+            "108.177.125.188",
+            "142.251.10.188",
+            "64.233.186.188",
+            "74.125.206.188"
+          ],
+          "alt1-mtalk.google.com": [
+            "2607:f8b0:4023:1c05::bc",
+            "2a00:1450:400b:c02::bc",       // IPv6 地址 (欧洲区域)
+            "74.125.200.188"
+          ],
+          "alt2-mtalk.google.com": "192.178.220.188",  // 单个地址可以不用数组
+          "alt3-mtalk.google.com": [
+            "2607:f8b0:4023:2009::bc",
+            "2607:f8b0:4023:100f::bc",
+            "74.125.131.188"
+          ],
+          "alt4-mtalk.google.com": "209.85.144.188",
+          "alt5-mtalk.google.com": [
+            "2607:f8b0:4003:c0a::bc",
+            "2a00:1450:4025:c01::bc",
+            "74.125.126.188"
+          ],
+          "alt6-mtalk.google.com": "142.250.115.188",
+          "alt7-mtalk.google.com": [
+            "2607:f8b0:4024:c0d::bc",
+            "2404:6800:4003:c06::bc",
+            "192.178.131.188"
+          ],
+          "alt8-mtalk.google.com": "172.253.132.188",
+          
+          // ---------- Google 下载服务 ----------
+          // 使用国内 CDN IP 加速下载 (180.163.x.x 是上海电信 CDN)
+          "dl.google.com": "180.163.151.161",
+          "dl.l.google.com": "180.163.150.33",
+          
+          // ---------- DNS 服务器本身的域名解析 ----------
+          // 这是鸡生蛋蛋生鸡问题的解决方案：
+          // DNS 服务器需要通过域名访问，但解析域名又需要 DNS 服务器
+          // 这里预设 IP 地址，打破循环依赖
+          // 每个 DNS 服务都配备了多条 IP 以提高可用性
+          "dns.alidns.com": [               // 阿里 DNS (DoQ)
+            "223.5.5.5",                     // 阿里 DNS 主
+            "223.6.6.6"                      // 阿里 DNS 备
+          ],
+          "doh.pub": [                      // DNSPod (DoH)
+            "1.12.12.21",
+            "120.53.53.53"
+          ],
+          "dns.google": [                   // Google DNS (DoH) - 需代理
+            "8.8.8.8",
+            "8.8.4.4"
+          ],
+          "dns.quad9.net": [               // Quad9 DNS (DoH) - 需代理
+            "149.112.112.112",
+            "9.9.9.9"
+          ],
+          "cloudflare-dns.com": [          // Cloudflare DNS (DoH3) - 需代理
+            "104.16.248.249",
+            "104.16.249.249"
+          ],
+          
+          // ---------- 规则集/配置更新相关域名 ----------
+          // 预设 IP 确保规则集能正常下载
+          "raw.githubusercontent.com": [    // GitHub 文件直链
+            "185.199.108.133",
+            "185.199.109.133",
+            "185.199.110.133",
+            "185.199.111.133"
+          ],
+          "cdn.jsdelivr.net": [            // jsDelivr CDN (可能需要代理)
+            "104.16.89.20",
+            "104.16.90.20"
+          ]
+        }
+      },
+
+      // --- 国内 DNS 服务器 ---
+      {
+        "type": "https",                    // DNS over HTTPS (DoH)
+        "tag": "tx_dns",                    // 腾讯 DNS (DNSPod)
+        "domain_resolver": "dns_hosts",     // 用 hosts 解析 doh.pub 的 IP，避免循环依赖
+        "server": "doh.pub"                 // 实际 DoH 地址: https://doh.pub/dns-query
+      },
+      {
+        "type": "quic",                     // DNS over QUIC (DoQ) - 基于 UDP，延迟更低
+        "tag": "ali_dns",                   // 阿里 DNS
+        "domain_resolver": "dns_hosts",
+        "server": "dns.alidns.com"          // 实际 DoQ 地址: quic://dns.alidns.com
+      },
+
+      // --- 国外 DNS 服务器 (需要代理) ---
+      // 【版本差异】本地文件和订阅链接版使用 "📦 CATCH_ALL" 作为 detour
+      // 【版本差异】优化版和修复版使用 "📦 sing-box" 作为 detour
+      {
+        "type": "https",
+        "tag": "google_dns",
+        "detour": "📦 sing-box",            // 【版本差异】通过代理出站访问
+                                            // 本地/订阅版: "📦 CATCH_ALL"
+        "domain_resolver": "dns_hosts",
+        "server": "dns.google"              // https://dns.google/dns-query
+      },
+      {
+        "type": "https",
+        "tag": "quad9_dns",
+        "detour": "📦 sing-box",            // 同上版本差异
+        "domain_resolver": "dns_hosts",
+        "server": "dns.quad9.net"           // https://dns.quad9.net/dns-query
+      },
+      {
+        "type": "h3",                       // DNS over HTTP/3 (DoH3) - 基于 QUIC
+        "tag": "cloudflare_dns",
+        "detour": "📦 sing-box",            // 同上版本差异
+        "domain_resolver": "dns_hosts",
+        "server": "cloudflare-dns.com"      // https://cloudflare-dns.com/dns-query
+      },
+
+      // ---【修复版新增】AdGuard DNS ---
+      // 用于最终兜底 DNS，自带广告过滤
+      // 仅存在于修复版
+      {
+        "type": "udp",                      // 传统 UDP DNS (端口53)
+        "tag": "adguard-dns",
+        "detour": "📦 sing-box",            // 需要代理访问
+        "domain_resolver": "dns_hosts",
+        "server": "dns.adguard.com",        // AdGuard DNS: 94.140.14.14 / 94.140.15.15
+        "server_port": 53
+      },
+
+      // --- DNS 服务器组 (负载均衡/故障转移) ---
+      {
+        "type": "group",
+        "tag": "direct_server",             // 国内直连 DNS 组
+        "servers": [
+          "ali_dns",                        // 阿里 DoQ (优先)
+          "tx_dns"                          // 腾讯 DoH (备用)
+        ]
+        // 默认使用第一个服务器，如果失败则尝试下一个
+      },
+      {
+        "type": "group",
+        "tag": "proxy_server",              // 代理 DNS 组
+        "servers": [
+          "google_dns",                     // Google DoH (优先)
+          "quad9_dns",                      // Quad9 DoH
+          "cloudflare_dns"                  // Cloudflare DoH3
+        ]
+      },
+
+      // --- FakeIP 服务器 ---
+      // FakeIP 机制：为需要代理的域名返回虚假 IP (198.18.0.0/15)
+      // 优点：避免 DNS 泄露，支持基于 IP 的路由规则
+      // 缺点：可能导致部分应用异常
+      {
+        "type": "fakeip",
+        "tag": "fakeip_server",
+        "inet4_range": "198.18.0.0/15",     // FakeIP 的 IPv4 地址池 (RFC 2544 保留段)
+        "inet6_range": "fc00::/18"          // FakeIP 的 IPv6 地址池 (唯一本地地址)
+      }
+    ],
+
+    // ----------------------------------------------------------
+    // DNS 规则 - 决定查询使用哪个 DNS 服务器
+    // 规则按顺序匹配，命中即停止
+    // ----------------------------------------------------------
+    "rules": [
+      // ---【优化版/修复版新增】广告域名直接返回空解析 ---
+      // 在 DNS 层面屏蔽广告，比路由层拦截更高效
+      {
+        "rule_set": [
+          "geosite-category-ads-all",       // sing-geosite 的广告分类
+          "geosite_adguard"                  // 额外的 AdGuard 过滤规则
+        ],
+        "action": "predefined",              // 返回预定义响应
+        "rcode": "NOERROR"                   // 返回空结果(查询成功但无记录)，让应用认为域名不存在
+      },
+
+      // --- Google FCM 和相关域名强制使用 hosts ---
+      // 使用预设的 IP 地址，确保推送服务稳定连接
+      {
+        "domain": [
+          "mtalk.google.com",
+          "alt1-mtalk.google.com",
+          "alt2-mtalk.google.com",
+          "alt3-mtalk.google.com",
+          "alt4-mtalk.google.com",
+          "alt5-mtalk.google.com",
+          "alt6-mtalk.google.com",
+          "alt7-mtalk.google.com",
+          "alt8-mtalk.google.com",
+          "dl.google.com",                   // Google 下载服务
+          "dl.l.google.com"
+        ],
+        "server": "dns_hosts"               // 使用 hosts 中预设的 IP
+      },
+
+      // ---【修复版新增】Google 连接检查域名强制使用 FakeIP ---
+      // 确保 Google 服务的心跳检测走代理
+      {
+        "domain_suffix": "connectivitycheck.gstatic.com",
+        "server": "fakeip_server"
+      },
+
+      // --- Clash 模式切换 ---
+      {
+        "clash_mode": "Global",             // Clash API 切换为全局模式时
+        "server": "proxy_server"            // 所有 DNS 查询走代理
+      },
+      {
+        "clash_mode": "Direct",             // Clash API 切换为直连模式时
+        "server": "direct_server"           // 所有 DNS 查询走国内
+      },
+
+      // --- 屏蔽特定类型的 DNS 查询 ---
+      // SVCB/HTTPS 记录用于 ECH/ESNI，可能暴露访问域名
+      // PTR 记录用于反向 DNS 查询，通常无用
+      {
+        "query_type": [
+          "SVCB",                           // 服务绑定记录
+          "HTTPS",                          // HTTPS 服务记录
+          "PTR"                             // 反向指针记录
+        ],
+        "action": "predefined",
+        "rcode": "NOERROR"                  // 返回空结果，阻止这些查询
+      },
+
+      // ---【仅在本地文件和订阅链接版本】特定条件下的广告过滤 ---
+      // 当没有启用 AllowAds 模式时，阻止广告域名
+      // 优化版和修复版已移除(用上面的 rule_set 替代)
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          {
+            "clash_mode": "AllowAds",       // 是否为允许广告模式
+            "invert": true                  // invert=true 表示非 AllowAds 模式
+          },
+          {
+            "domain": [
+              "a0.app.xiaomi.com",          // 小米广告域名
+              "appversion.115.com"          // 115网盘更新域名
+            ],
+            "rule_set": "geosite-category-ads-all"
+          }
+        ],
+        "action": "predefined",
+        "rcode": "NOERROR"
+      },
+
+      // --- 特定国内服务和规则集使用直连 DNS ---
+      // 四个版本都有，逻辑相同
+      {
+        "domain_suffix": [
+          "market.xiaomi.com",              // 小米应用商店
+          "lancache.steamcontent.com",      // Steam 局域网缓存
+          "tracking.miui.com",             // MIUI 跟踪(被错误拦截会导致问题)
+          "steamserver.net"                 // Steam 服务器
+        ],
+        "rule_set": [
+          "cn",                             // sing-geosite 中国域名列表
+          "private"                         // 私有/局域网域名
+        ],
+        "server": "direct_server"           // 使用国内 DNS 解析
+      },
+
+      // ---【优化版专属】已知代理域名使用 FakeIP ---
+      // 将这些域名的 DNS 查询直接返回 FakeIP，实现 DNS 与代理的无缝衔接
+      // 其他版本没有此规则，走后续的通配规则
+      {
+        "rule_set": [
+          "geosite-google",
+          "geosite-youtube",
+          "geosite-telegram",
+          "geosite-twitter",
+          "geosite-github",
+          "geosite-microsoft",
+          "geosite-apple",
+          "geosite-bahamut",
+          "Proxy",
+          "gfw"
+        ],
+        "server": "fakeip_server"           // 返回 FakeIP，后续路由根据 FakeIP 段分流
+      },
+
+      // ---【版本差异】通配规则 ---
+      // 优化版和修复版：先尝试直连 DNS
+      {
+        "action": "evaluate",              // "evaluate" 是一个特殊动作
+        "server": "direct_server"          // 【修复版】使用直连 DNS 进行尝试性解析
+                                            // 【优化版】也使用 direct_server
+                                            // 【本地/订阅版】使用 proxy_server
+                                            // 
+                                            // 注意：evaluate 的具体行为取决于 sing-box 版本
+                                            // 通常用于在最终决策前进行一次评估查询
+                                            // 修复版改为 direct_server 是为了减少代理 DNS 的负担
+      },
+      
+      // --- 匹配响应规则 ---
+      // 当 DNS 服务器本身被匹配时(如通过规则集)，返回响应
+      {
+        "match_response": true,
+        "action": "respond"
+      }
+    ],
+
+    // --- DNS 最终兜底策略 ---
+    // 【版本差异】
+    // 本地文件版/订阅链接版/优化版: "proxy_server" (未匹配的域名走代理 DNS)
+    // 修复版: "adguard-dns" (使用 AdGuard DNS 作为最终解析，自带广告过滤)
+    "final": "adguard-dns",                 // 【修复版】AdGuard DNS 兜底
+                                            // 其他版本: "proxy_server"
+    
+    "strategy": "prefer_ipv4",              // 优先使用 IPv4 地址
+                                            // 可选: "prefer_ipv6", "ipv4_only", "ipv6_only"
+    
+    "cache_capacity": 65536,               // 【优化版/修复版】DNS 缓存容量 65536 条
+                                            // 【本地/订阅版】4096 条
+                                            // 更大的缓存能减少重复查询，但占用更多内存
+    
+    "optimistic": {                         // DNS 乐观缓存
+      "enabled": true,                      // 启用乐观缓存
+      "timeout": "120h0m0s"                 // 缓存有效期 120 小时 (5天)
+                                            // 在缓存过期前会尝试后台刷新
+    }
+  },
+
+  // ============================================================
+  // 第三部分：HTTP 客户端配置 (http_clients)
+  // 四个版本相同(除 detour 标签差异)
+  // ============================================================
+  "http_clients": [
+    {
+      "tag": "direct_client",              // 直连 HTTP 客户端
+      "version": 2,                         // HTTP/2
+      // stream_receive_window: HTTP/2 流接收窗口大小
+      // 0 表示使用 Go 默认值 (通常是 16KB-32KB)
+      // connection_receive_window: HTTP/2 连接接收窗口大小
+      // 0 表示使用 Go 默认值
+      "stream_receive_window": 0,
+      "connection_receive_window": 0
+    },
+    {
+      "tag": "proxy_client",               // 代理 HTTP 客户端 (用于下载规则集等)
+      "version": 2,
+      // 【版本差异】
+      // 本地/订阅版: "📦 CATCH_ALL"
+      // 优化版/修复版: "📦 sing-box"
+      "detour": "📦 sing-box",              // 通过代理出站
+      "stream_receive_window": 0,
+      "connection_receive_window": 0
+    }
+  ],
+
+  // ============================================================
+  // 第四部分：入站配置 (inbounds)
+  // 四个版本完全相同
+  // ============================================================
+  "inbounds": [
+    {
+      "type": "redirect",                  // 透明代理 (REDIRECT/TPROXY)
+      "tag": "redirect-in",
+      "listen": "::",                      // 监听所有 IPv6 和 IPv4 地址
+      "listen_port": 7897                  // 透明代理端口 (iptables/nftables 转发到这)
+    },
+    {
+      "type": "mixed",                     // 混合代理 (HTTP + SOCKS5)
+      "tag": "mixed-in",
+      "listen": "::",
+      "listen_port": 7890                  // 系统代理端口 (浏览器/应用设置这个代理)
+    },
+    {
+      "type": "tun",                       // TUN 虚拟网卡 (最彻底的代理方式)
+      "tag": "tun-in",
+      "interface_name": "tun0",           // 虚拟网卡名称
+      "mtu": 9000,                        // 最大传输单元 (9000 是巨型帧，减少分片)
+      "address": [
+        "172.19.0.1/30",                  // IPv4 地址段 (172.19.0.1 是网关)
+        "fdfe:dcba:9876::1/126"           // IPv6 地址段
+      ],
+      "auto_route": true,                  // 自动添加路由规则，劫持系统流量
+      "auto_redirect": true,              // 自动配置透明代理规则
+      "strict_route": true,               // 严格路由模式，防止路由泄漏
+      "stack": "system"                    // 使用系统网络栈 (也可选 "gvisor" 用户空间栈)
+    }
+  ],
+
+  // ============================================================
+  // 第五部分：出站配置 (outbounds)
+  // 这是代理链的出口，定义了所有的出站策略
+  // ============================================================
+  "outbounds": [
+    // ---------- 最终兜底选择器 ----------
+    // 【优化版/修复版新增】提供最终出站的精细控制
+    {
+      "type": "selector",                  // 手动选择器类型
+      "tag": "🚦 FINAL",
+      "outbounds": [
+        "📦 sing-box",                     // 代理 (优化版/修复版使用 sing-box 标签)
+        "🇨🇳 DIRECT",                      // 国内直连
+        "❌ REJECT-DROP"                   // 拒绝连接
+      ],
+      "providers": null,
+      "default": "❌ REJECT-DROP",         // 默认拒绝所有未匹配的连接 (安全优先)
+      "interrupt_exist_connections": true  // 切换出站时中断已有连接
+    },
+
+    // ---------- 拒绝出站 ----------
+    // 【优化版/修复版新增】
+    {
+      "type": "block",                     // block 类型：直接拒绝所有连接
+      "tag": "❌ REJECT-DROP"
+    },
+
+    // ---------- 主代理选择器 ----------
+    // 【版本差异】标签名不同
+    {
+      "type": "selector",
+      // 本地文件版/订阅链接版: "📦 CATCH_ALL"
+      // 优化版/修复版: "📦 sing-box"
+      "tag": "📦 sing-box",
+      "outbounds": [
+        // 本地/订阅版: "🇨🇳 All Nodes"
+        // 优化版/修复版: "🇨🇳 DIRECT"
+        "🇨🇳 DIRECT"                       // 默认出站
+      ],
+      "providers": null,
+      "interrupt_exist_connections": true
+    },
+
+    // ---------- Google 服务选择器 ----------
+    {
+      "type": "selector",
+      "tag": "🧭 Google Services",
+      "outbounds": [
+        // 本地/订阅版: "🇨🇳 All Nodes"
+        // 优化版/修复版: "🇨🇳 DIRECT"
+        "🇨🇳 DIRECT"
+      ],
+      "providers": null,
+      "interrupt_exist_connections": true
+    },
+
+    // ---------- Google FCM 推送选择器 ----------
+    // FCM 对连接稳定性要求高，提供独立的策略控制
+    {
+      "type": "selector",
+      "tag": "📬 Google FCM",
+      "outbounds": [
+        // 各版本的出站列表有差异
+        "📦 sing-box",                     // 【修复版新增】优先代理
+        // 本地/订阅版: "direct"
+        // 优化版/修复版: "🇨🇳 DIRECT"
+        "🇨🇳 DIRECT",
+        "🧭 Google Services"
+      ],
+      "providers": null,
+      // 【修复版新增】默认使用代理，确保 FCM 稳定连接
+      "default": "📦 sing-box",
+      "interrupt_exist_connections": true
+    },
+
+    // ---------- Apple 服务选择器 ----------
+    {
+      "type": "selector",
+      "tag": "🍎 Apple",
+      "outbounds": [
+        // 本地/订阅版: "direct"
+        // 优化版/修复版: "🇨🇳 DIRECT"
+        "🇨🇳 DIRECT",
+        // 本地/订阅版: "🇨🇳 All Nodes"
+        // 优化版/修复版: "📦 sing-box"
+        "📦 sing-box"
+      ],
+      "providers": null,
+      "default": "🇨🇳 DIRECT",             // 【修复版新增】默认直连
+                                            // Apple 国内服务(iCloud云贵)走直连更快
+      "interrupt_exist_connections": true
+    },
+
+    // ---------- 流媒体选择器 ----------
+    {
+      "type": "selector",
+      "tag": "📺 StreamingME",
+      "outbounds": [
+        "🇨🇳 DIRECT",
+        "📦 sing-box"                      // 版本差异同上
+      ],
+      "providers": null,
+      "interrupt_exist_connections": true
+    },
+
+    // ---------- Microsoft 服务选择器 ----------
+    {
+      "type": "selector",
+      "tag": "🪟 Microsoft",
+      "outbounds": [
+        "🇨🇳 DIRECT",
+        "📦 sing-box"                      // 版本差异同上
+      ],
+      "providers": null,
+      "interrupt_exist_connections": true
+    },
+
+    // ---------- Telegram 选择器 ----------
+    {
+      "type": "selector",
+      "tag": "📠 Telegram",
+      "outbounds": [
+        // 本地/订阅版: "🇨🇳 All Nodes"
+        // 优化版/修复版: "📦 sing-box"
+        "📦 sing-box"
+      ],
+      "providers": null,
+      "default": "📦 sing-box",            // Telegram 必须走代理
+      "interrupt_exist_connections": true
+    },
+
+    // ---------- 国内直连/节点选择器 ----------
+    // 【版本差异】标签名和功能不同
+    {
+      "type": "selector",
+      // 本地/订阅版: "🇨🇳 All Nodes" (包含所有订阅节点)
+      // 优化版/修复版: "🇨🇳 DIRECT" (国内直连，包含所有节点)
+      "tag": "🇨🇳 DIRECT",
+      "outbounds": null,                   // 动态从 providers 加载
+      "providers": null,
+      "use_all_providers": true,           // 使用所有 providers 中的出站
+      "interrupt_exist_connections": true
+    },
+
+    // ---------- 全局模式选择器 ----------
+    {
+      "type": "selector",
+      "tag": "GLOBAL",
+      "outbounds": [
+        // 本地/订阅版: "📦 CATCH_ALL"
+        // 优化版/修复版: "📦 sing-box"
+        "📦 sing-box",
+        "🇨🇳 DIRECT"
+      ],
+      "providers": null,
+      "default": "📦 sing-box",            // 全局模式默认走代理
+      "interrupt_exist_connections": true   // 注意：这个属性拼写错误，应为 interrupt_exist_connections
+                                            // 但 sing-box 可能兼容两种写法
+    },
+
+    // ---------- 纯净直连出站 ----------
+    {
+      "type": "direct",                    // 直接连接，不经过任何代理
+      "tag": "direct",
+      "domain_resolver": "direct_server"   // 使用国内 DNS 解析
+    }
+  ],
+
+  // ============================================================
+  // 第六部分：节点提供者 (providers)
+  // 【版本差异】本地文件 vs 远程订阅
+  // ============================================================
+  "providers": [
+    {
+      // --- 本地文件版 ---
+      // "type": "local",                  // 从本地文件加载节点
+      // "tag": "local_nodes",
+      // "path": "./providers/config.json",// 节点配置文件路径
+      // --- 优化版/修复版 ---
+      "type": "remote",                    // 从远程 URL 加载节点
+      "tag": "my_nodes",
+      "url": "你的订阅链接",               // <--- 请替换为实际的订阅链接
+      "path": "./providers/my_nodes.json", // 下载后的本地缓存路径
+      "http_client": "direct_client",      // 【版本差异】订阅/优化/修复版使用直连客户端下载
+                                            // 本地版没有此字段
+      "update_interval": "24h0m0s",        // 每24小时自动更新订阅
+      "health_check": {                    // 节点健康检查
+        "enabled": true,
+        "url": "https://www.gstatic.com/generate_204",  // Google 的连通性检测地址
+                                                         // 返回 HTTP 204 表示通
+        "interval": "1h0m0s",              // 每1小时检查一次
+        "timeout": "3s"                    // 超时时间3秒
+      }
+    }
+  ],
+
+  // ============================================================
+  // 第七部分：路由配置 (route)
+  // 核心规则引擎，决定流量的最终出站
+  // ============================================================
+  "route": {
+    "rules": [
+      // --- 规则 1: 域名嗅探 ---
+      // 对 TLS/HTTP 流量进行 SNI/Host 嗅探，获取真实域名
+      // 这对于基于域名的路由规则至关重要
+      { "action": "sniff" },
+
+      // --- 规则 2: 绕过本地代理端口 ---
+      // 防止 sing-box 自身流量被代理(避免循环)
+      { "ip_cidr": "127.0.0.0/8", "port": [7897, 7898], "action": "bypass" },
+
+      // --- 规则 3: ICMP 直连 ---
+      // ping 等 ICMP 协议直接走直连
+      { "network": "icmp", "outbound": "direct" },
+
+      // --- 规则 4:【版本位置不同】IPv6 非公网地址拒绝 ---
+      // 拒绝非公网 IPv6 地址的连接
+      // 优化版/修复版将此规则移到了更后的位置
+      {
+        "type": "logical",
+        "mode": "and",
+        "rules": [
+          { "ip_version": 6 },             // IPv6
+          { "default_interface_address": "2000::/3", "invert": true }  // 非公网 IPv6 (2000::/3 是公网范围)
+        ],
+        "action": "reject"
+      },
+
+      // --- 规则 5: DNS 劫持 ---
+      // 将发往其他 DNS 服务器的请求劫持到 sing-box 内置 DNS
+      { "protocol": "dns", "action": "hijack-dns" },
+
+      // --- 规则 6-7: Clash 模式切换 ---
+      { "clash_mode": "Global", "outbound": "GLOBAL" },
+      { "clash_mode": "Direct", "outbound": "direct" },
+
+      // --- 规则 8:【优化版/修复版调整位置】国内应用直连 ---
+      // 将国内主流应用强制走直连，避免被错误代理
+      {
+        "package_name": [                  // Android 应用包名匹配 (需要 find_process: true)
+          "com.tencent.mm",                // 微信
+          "com.tencent.mobileqq",          // QQ
+          "com.alibaba.android.rimet",     // 钉钉
+          "com.eg.android.AlipayGphone",   // 支付宝
+          "com.netease.cloudmusic"         // 网易云音乐
+        ],
+        "outbound": "direct"
+      },
+
+      // --- 规则 9:【优化版/修复版新增】微信 DNS 直连 ---
+      // 微信可能使用特定 DNS，确保直连
+      { "domain": "dns.weixin.qq.com.cn", "outbound": "direct" },
+
+      // --- 规则 10: 国内服务和规则集直连 ---
+      // 四个版本都有，逻辑相同
+      {
+        "domain_suffix": [                 // 特定域名后缀直连
+          "market.xiaomi.com",             // 小米应用商店 (直连更快)
+          "lancache.steamcontent.com",     // Steam 局域网缓存
+          "tracking.miui.com",            // MIUI 跟踪 (不能拦截，否则影响系统)
+          "steamserver.net"                // Steam 服务器
+        ],
+        "rule_set": [                      // 规则集补充
+          "cn",                            // 中国域名
+          "private",                       // 私有域名
+          // --- 优化版/修复版新增 ---
+          "cnip",                          // 中国 IP
+          "apple-cn",                      // Apple 中国服务
+          "microsoft-cn",                  // Microsoft 中国服务
+          "google-cn",                     // Google 中国服务
+          "games-cn"                       // 游戏平台中国服务
+        ],
+        "outbound": "direct"
+      },
+
+      // --- 规则 11: 广告域名拒绝 ---
+      // 在路由层面拒绝广告连接 (DNS 层面已屏蔽，这是第二道防线)
+      {
+        // 本地/订阅版: 仅使用 geosite-category-ads-all 和少数特定域名
+        // 优化版/修复版: 使用多个规则集增强拦截
+        "rule_set": [
+          "geosite-category-ads-all",
+          "geosite_adguard",               // AdGuard 规则
+          "Ads",                           // 额外广告规则
+          "DNSreject"                      // DNS 拒绝规则
+        ],
+        // 本地/订阅版: 还包含以下域名
+        // "domain": ["abyss.cyapi.cn", "ad.cyapi.cn", "gather.colorfulclouds.net"],
+        "action": "reject",
+        "method": "drop"                   // 直接丢弃数据包 (无响应)，比 reject 更隐蔽
+      },
+
+      // --- 规则 12:【修复版】特定域名处理 ---
+      // 将彩云天气相关域名拆分处理
+      {
+        "domain": [
+          "abyss.cyapi.cn",               // 可能是广告/跟踪域名 -> 拒绝
+          "ad.cyapi.cn"                    // 明确的广告域名 -> 拒绝
+        ],
+        "action": "reject",
+        "method": "drop"
+      },
+      // gather.colorfulclouds.net 被移到后面走代理
+      {
+        "domain": "gather.colorfulclouds.net",  // 彩云天气数据收集 -> 走代理
+        "outbound": "📦 sing-box"
+      },
+
+      // --- 规则 13:【修复版新增】Google 连接检查 ---
+      // 确保 Google 服务连通性检测走代理
+      {
+        "domain_suffix": "connectivitycheck.gstatic.com",
+        "outbound": "📦 sing-box"
+      },
+
+      // --- 规则 14: FakeIP 段路由 ---
+      // 将 FakeIP 地址段的流量强制走代理
+      // 【仅优化版有此规则】
+      { "ip_cidr": "198.18.0.0/15", "outbound": "📦 sing-box" },
+
+      // --- 规则 15: 已知代理域名/规则集 ---
+      // 这些域名必须走代理
+      {
+        "rule_set": [
+          "geosite-google",               // Google 全系
+          "geosite-youtube",              // YouTube
+          "geosite-twitter",              // Twitter/X
+          "geosite-github",               // GitHub (国内访问不稳定)
+          "geosite-microsoft",            // Microsoft (部分服务被墙)
+          "geosite-apple",                // Apple (外区服务需代理)
+          "geosite-telegram",             // Telegram (完全被墙)
+          "geosite-bahamut",              // 巴哈姆特 (台湾游戏论坛，被墙)
+          "Proxy",                         // 通用代理规则
+          "gfw",                          // GFW 列表
+          "telegramip",                    // Telegram IP 段
+          "telegram_ip"                    // Telegram IP (另一来源)
+        ],
+        "outbound": "📦 sing-box"
+        // 本地/订阅版: "📦 CATCH_ALL"
+      },
+
+      // --- 规则 16:【优化版/修复版新增】特定应用走代理 ---
+      // 通过 Android 包名强制代理
+      {
+        "package_name": [
+          "org.telegram.group",           // Telegram
+          "org.telegram.messenger",
+          "org.telegram.messenger.beta",
+          "com.google.android.youtube",   // YouTube
+          "app.revanced.android.youtube"   // YouTube ReVanced
+        ],
+        "outbound": "📦 sing-box"
+      },
+
+      // --- 规则 17: Google FCM 分流 ---
+      // FCM 使用独立的选择器，方便单独调整策略
+      {
+        "type": "logical",
+        "mode": "or",                      // 满足任一条件
+        "rules": [
+          {
+            "domain_keyword": [            // 域名关键字匹配
+              "mtalk.google.com",          // FCM 主域名
+              "dl.google",                 // Google 下载
+              "dl.l.google"
+            ]
+          },
+          { "port": 5228 }                 // FCM 标准端口 5228
+        ],
+        "outbound": "📬 Google FCM"        // 使用 FCM 专用选择器
+      },
+
+      // --- 规则 18: 解析步骤 ---
+      // 在所有基于域名的规则之后，进行 DNS 解析
+      // 之后的规则可以基于 IP 地址进行匹配
+      { "action": "resolve" },
+
+      // --- 规则 19-20: 最终 IP 分流 ---
+      // DNS 解析后，根据 IP 地址进行最终分流
+      { "rule_set": "cnip", "outbound": "direct" },        // 中国 IP 直连
+      { "rule_set": "Proxy", "outbound": "📦 sing-box" }    // 代理 IP 走代理
+      // 本地/订阅版: 使用 "geosite-geolocation-!cn" 规则集
+      // 优化版/修复版: 使用 "Proxy" 规则集
+    ],
+
+    // ----------------------------------------------------------
+    // 规则集定义
+    // ----------------------------------------------------------
+    "rule_set": [
+      // ---------- 广告/隐私相关 ----------
+      {
+        "type": "remote",
+        "tag": "geosite-category-ads-all",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
+        // 本地/订阅版没有以下两个字段，使用默认设置
+        "http_client": "direct_client",    // 使用直连客户端下载
+        "update_interval": "48h0m0s"       // 每48小时更新
+      },
+      // 【优化版/修复版新增】额外的广告过滤规则集
+      {
+        "type": "remote",
+        "tag": "geosite_adguard",
+        "url": "https://cdn.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblocksingbox.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "Ads",
+        "url": "https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/ads.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "DNSreject",
+        "url": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/main/rule/AdGuardSDNSFilter/AdGuardSDNSFilter.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+
+      // ---------- 国内/私有网络 ----------
+      {
+        "type": "remote",
+        "tag": "private",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-private.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "cn",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "cnip",
+        // 【版本差异】本地/订阅版使用旧版 URL
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/cnip.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      // 【优化版/修复版新增】分平台中国服务规则
+      {
+        "type": "remote",
+        "tag": "apple-cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/apple-cn.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "microsoft-cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/microsoft-cn.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "google-cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/google-cn.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "games-cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/games-cn.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+
+      // ---------- 各大平台规则 ----------
+      {
+        "type": "remote",
+        "tag": "geosite-google",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-google.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-youtube",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-youtube.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-twitter",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-twitter.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-github",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-github.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-microsoft",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-microsoft.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-apple",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-apple.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-telegram",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-telegram.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-bahamut",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-bahamut.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+
+      // ---------- 综合代理规则 ----------
+      {
+        "type": "remote",
+        "tag": "Proxy",
+        // 本地/订阅版使用旧版 jsdelivr URL，优化/修复版使用 raw.githubusercontent.com
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "gfw",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/gfw.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "telegramip",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/telegramip.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "telegram_ip",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip/telegram.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      },
+
+      // ----------【本地/订阅版】额外规则 ----------
+      // 优化版/修复版已移除 "geosite-geolocation-!cn"，改用 "Proxy" 规则集
+      {
+        "type": "remote",
+        "tag": "geosite-geolocation-!cn",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-geolocation-!cn.srs",
+        "http_client": "direct_client",
+        "update_interval": "48h0m0s"
+      }
+    ],
+
+    // --- 路由最终出站 ---
+    // 【版本差异】
+    // 本地文件版/订阅链接版: "📦 CATCH_ALL"
+    // 优化版/修复版: "🚦 FINAL"
+    "final": "🚦 FINAL",
+
+    // --- 高级路由选项 ---
+    "find_process": true,                  // 启用进程查找 (支持 package_name 匹配)
+    "auto_detect_interface": true,         // 自动检测网络接口
+    "default_domain_resolver": "direct_server",  // 默认域名解析器
+    "default_http_client": "direct_client",       // 默认 HTTP 客户端
+    "default_domain_match_strategy": "prefer_fqdn" // 域名匹配策略优先使用完整域名(FQDN)
+  },
+
+  // ============================================================
+  // 第八部分：实验性功能 (experimental)
+  // 四个版本完全相同
+  // ============================================================
+  "experimental": {
+    // --- 缓存文件 ---
+    "cache_file": {
+      "enabled": true,
+      "path": "./cache.db",               // 缓存数据库路径
+      "store_fakeip": true,               // 存储 FakeIP 映射到缓存 (重启后保留)
+      "store_dns": true                   // 存储 DNS 缓存到文件 (重启后保留)
+    },
+    // --- Clash API (兼容 Clash 面板) ---
+    "clash_api": {
+      "external_controller": "[::]:9090", // API 监听地址和端口
+                                           // [::] 表示监听所有 IPv4 和 IPv6
+      "external_ui": "ui"                 // Web UI 文件目录 (如 Yacd/Clash-dashboard)
+    },
+    // --- 调试选项 ---
+    "debug": {
+      "gc_percent": 100,                   // 垃圾回收触发百分比 (Go GC)
+                                           // 100 是默认值，增大可减少 GC 频率但占用更多内存
+      "memory_limit": "200MB"              // 软内存限制 (Go soft memory limit)
+                                           // 达到此限制时会主动触发 GC
+    },
+    // --- 统一延迟测试 ---
+    // 在 URLTest 模式下使用统一的延迟测试方法
+    "urltest_unified_delay": true
+  }
+}
+
+// ============================================================
+// 附录：版本差异详细说明
+// ============================================================
+//
+// 【本地文件版 vs 订阅链接版】
+//   唯一区别在于 providers 的类型：
+//   - 本地文件版: "type": "local", 从本地 JSON 文件加载节点
+//   - 订阅链接版: "type": "remote", 从远程 URL 下载节点配置
+//   订阅链接版是基础版本，其他版本在其基础上演化
+//
+// 【订阅链接版 -> 优化版 主要变更】
+//   1. 标签重构: "📦 CATCH_ALL" -> "📦 sing-box", "🇨🇳 All Nodes" -> "🇨🇳 DIRECT"
+//   2. 出站管理: 新增 "🚦 FINAL" 最终选择器和 "❌ REJECT-DROP" 拒绝出站
+//   3. DNS 增强: 新增 AdGuard 规则集过滤广告域名
+//   4. FakeIP 分离: 将已知代理域名独立使用 FakeIP，实现 DNS 泄露防护
+//   5. 规则集扩展: 从 14 个扩展到 23 个，覆盖更精细
+//   6. 应用分流: 新增微信/钉钉/支付宝等国内应用直连规则
+//   7. 缓存优化: DNS 缓存从 4096 提升到 65536
+//
+// 【优化版 -> 修复版 主要变更】
+//   1. DNS 最终策略: "proxy_server" -> "adguard-dns" (AdGuard DNS 兜底)
+//   2. 移除 FakeIP 分离: DNS 规则中不再将代理域名指向 fakeip_server
+//      而是走后续的 evaluate 规则
+//   3. Google FCM 增强: 默认使用代理("📦 sing-box")，确保推送稳定
+//   4. Apple 服务: 添加默认直连("🇨🇳 DIRECT")
+//   5. 彩云天气: gather.colorfulclouds.net 改为走代理
+//   6. Google 连通性检测: 指定走代理出站
+//   7. DNS evaluate 优化: 使用 direct_server 替代 proxy_server
+//      减少代理 DNS 的查询负担
+//
+// 【已知问题和注意事项】
+//   1. providers 中 "你的订阅链接" 需要替换为实际的订阅 URL
+//   2. 本地文件版需要确保 "./providers/config.json" 文件存在
+//   3. "interrupt_exist_connections" 有拼写错误(正确的可能是 interrupt_existing_connections)
+//      但 sing-box 可能同时兼容两种写法
+//   4. FakeIP 段 198.18.0.0/15 是 RFC 2544 保留地址，通常不会冲突
+//   5. 规则集 URL 使用 jsDelivr CDN，国内可能下载缓慢或失败
+//      可以考虑替换为镜像地址
+//   6. AdGuard DNS (dns.adguard.com) 在某些网络环境下可能被屏蔽
+//   7. QUIC (DoQ/H3) 协议在某些网络环境下可能被 QoS 限制
+//   8. cache_capacity 65536 可能对低内存设备不友好
+//   9. GC percent 100 和 memory limit 200MB 适合大多数场景
+//      可根据设备配置调整
+//
+// ============================================================
+
+{
+  "sing-box_1.14.0-alpha.21.reF1nd_版本对比总结": {
+    "概述": {
+      "基础版本": "1.14.0-alpha.21.reF1nd订阅链接.json",
+      "衍生版本": [
+        "1.14.0-alpha.21.reF1nd本地文件.json (本地节点源变体)",
+        "1.14.0-alpha.21.reF1nd优化版.json (规则和策略增强版)",
+        "1.14.0-alpha.21.reF1nd修复版.json (DNS和路由逻辑修复版)"
+      ],
+      "共同特征": [
+        "所有版本共用相同的日志配置 (trace级别, 输出到/dev/null)",
+        "所有版本共用相同的入站配置 (redirect:7897, mixed:7890, tun:172.19.0.1/30)",
+        "所有版本共用相同的实验性功能 (cache.db, Clash API :9090, 内存限制200MB)",
+        "所有版本共用相同的 DNS hosts 预定义列表 (Google FCM, DNS服务器IP等)",
+        "所有版本共用相同的 DNS 服务器基础架构 (阿里DoQ, 腾讯DoH, Google DoH等)",
+        "所有版本共用相同的 HTTP 客户端结构 (direct_client, proxy_client)",
+        "所有版本共用相同的 Clash 模式切换规则 (Global/Direct)",
+        "所有版本共用相同的 DNS 查询类型屏蔽 (SVCB, HTTPS, PTR)",
+        "所有版本共用相同的 Google FCM 域名处理逻辑",
+        "所有版本共用相同的国内服务直连域名后缀 (小米, Steam, MIUI)"
+      ]
+    },
+
+    "核心差异对比": {
+      
+      "1_节点来源_providers": {
+        "本地文件版": {
+          "type": "local",
+          "tag": "local_nodes",
+          "path": "./providers/config.json",
+          "更新方式": "手动替换本地文件",
+          "适用场景": "本地节点测试，无订阅链接"
+        },
+        "订阅链接版": {
+          "type": "remote",
+          "tag": "my_nodes",
+          "url": "你的订阅链接 (需替换)",
+          "path": "./providers/config.json",
+          "http_client": "direct_client",
+          "update_interval": "24h0m0s",
+          "适用场景": "有远程订阅链接的普通用户 [基础版本]"
+        },
+        "优化版": {
+          "type": "remote",
+          "tag": "my_nodes",
+          "url": "你的订阅链接",
+          "path": "./providers/my_nodes.json",
+          "http_client": "direct_client",
+          "update_interval": "24h0m0s",
+          "变更": "缓存路径改为 my_nodes.json"
+        },
+        "修复版": {
+          "type": "remote",
+          "tag": "my_nodes",
+          "url": "你的订阅链接",
+          "path": "./providers/my_nodes.json",
+          "http_client": "direct_client",
+          "update_interval": "24h0m0s",
+          "变更": "同优化版"
+        }
+      },
+
+      "2_出站标签命名": {
+        "本地文件版": {
+          "主代理组": "📦 CATCH_ALL",
+          "节点选择器": "🇨🇳 All Nodes",
+          "直连标签": "direct"
+        },
+        "订阅链接版": {
+          "主代理组": "📦 CATCH_ALL",
+          "节点选择器": "🇨🇳 All Nodes",
+          "直连标签": "direct"
+        },
+        "优化版": {
+          "主代理组": "📦 sing-box",
+          "节点选择器": "🇨🇳 DIRECT",
+          "直连标签": "direct"
+        },
+        "修复版": {
+          "主代理组": "📦 sing-box",
+          "节点选择器": "🇨🇳 DIRECT",
+          "直连标签": "direct"
+        }
+      },
+
+      "3_出站策略架构": {
+        "本地文件版": {
+          "出站总数": 10,
+          "特殊出站": "无",
+          "最终选择器": "GLOBAL (直接使用)",
+          "架构特点": "简单，CATCH_ALL 直接关联 All Nodes，无兜底拒绝"
+        },
+        "订阅链接版": {
+           "出站总数": 10,
+          "特殊出站": "无",
+          "最终选择器": "GLOBAL (直接使用)",
+          "架构特点": "同本地文件版 [基础架构]"
+        },
+        "优化版": {
+          "出站总数": 12,
+          "新增出站": [
+            "🚦 FINAL (最终兜底选择器)",
+            "❌ REJECT-DROP (block类型，拒绝连接)"
+          ],
+          "最终选择器": "🚦 FINAL (默认: REJECT-DROP)",
+          "架构特点": "三层选择器: FINAL -> sing-box -> DIRECT，安全默认拒绝"
+        },
+        "修复版": {
+          "出站总数": 12,
+          "新增出站": [
+            "🚦 FINAL (最终兜底选择器)",
+            "❌ REJECT-DROP (block类型，拒绝连接)"
+          ],
+          "最终选择器": "🚦 FINAL (默认: REJECT-DROP)",
+          "架构特点": "同优化版，且 FCM 和 Apple 有默认出站策略"
+        }
+      },
+
+      "4_DNS_规则集数量": {
+        "本地文件版": {
+          "规则集总数": 14,
+          "广告规则": "geosite-category-ads-all (1个)",
+          "平台规则": ["google", "twitter", "!cn", "youtube", "github", "microsoft", "apple", "telegram", "bahamut"],
+          "国内规则": ["cn", "private"],
+          "IP规则": "cn_ip",
+          "其他": "geosite-geolocation-!cn"
+        },
+        "订阅链接版": {
+          "规则集总数": 14,
+          "广告规则": "geosite-category-ads-all (1个)",
+          "平台规则": ["google", "twitter", "!cn", "youtube", "github", "microsoft", "apple", "telegram", "bahamut"],
+          "国内规则": ["cn", "private"],
+          "IP规则": "cn_ip",
+          "其他": "geosite-geolocation-!cn"
+        },
+        "优化版": {
+          "规则集总数": 23,
+          "广告规则": [
+            "geosite-category-ads-all",
+            "geosite_adguard",
+            "Ads",
+            "DNSreject"
+          ],
+          "平台规则": [
+            "geosite-google",
+            "geosite-youtube",
+            "geosite-twitter",
+            "geosite-github",
+            "geosite-microsoft",
+            "geosite-apple",
+            "geosite-telegram",
+            "geosite-bahamut"
+          ],
+          "国内规则": [
+            "cn",
+            "private",
+            "cnip",
+            "apple-cn",
+            "microsoft-cn",
+            "google-cn",
+            "games-cn"
+          ],
+          "综合代理": ["Proxy", "gfw"],
+          "Telegram专项": ["telegramip", "telegram_ip"]
+        },
+        "修复版": {
+          "规则集总数": 23,
+          "广告规则": [
+            "geosite-category-ads-all",
+            "geosite_adguard",
+            "Ads",
+            "DNSreject"
+          ],
+          "平台规则": [
+            "geosite-google",
+            "geosite-youtube",
+            "geosite-twitter",
+            "geosite-github",
+            "geosite-microsoft",
+            "geosite-apple",
+            "geosite-telegram",
+            "geosite-bahamut"
+          ],
+          "国内规则": [
+            "cn",
+            "private",
+            "cnip",
+            "apple-cn",
+            "microsoft-cn",
+            "google-cn",
+            "games-cn"
+          ],
+          "综合代理": ["Proxy", "gfw"],
+          "Telegram专项": ["telegramip", "telegram_ip"]
+        }
+      },
+
+      "5_DNS_解析流程": {
+        "本地文件版": {
+          "广告过滤": "基于 clash_mode 条件判断 (允许广告模式)",
+          "FakeIP使用": "未分离，所有非cn域名走 proxy_server",
+          "evaluate动作": "server: proxy_server",
+          "最终DNS": "proxy_server (未匹配域名走代理DNS)"
+        },
+        "订阅链接版": {
+          "广告过滤": "基于 clash_mode 条件判断 (允许广告模式)",
+          "FakeIP使用": "未分离，所有非cn域名走 proxy_server",
+          "evaluate动作": "server: proxy_server",
+          "最终DNS": "proxy_server [基础DNS策略]"
+        },
+        "优化版": {
+          "广告过滤": "规则集强制返回空解析 (geosite-category-ads-all + geosite_adguard)",
+          "FakeIP使用": "分离使用，已知代理域名规则集使用 fakeip_server",
+          "evaluate动作": "server: direct_server",
+          "最终DNS": "proxy_server"
+        },
+        "修复版": {
+          "广告过滤": "同优化版",
+          "FakeIP使用": "移除分离，恢复走后续规则 (evaluate)",
+          "evaluate动作": "server: direct_server (减轻代理DNS负担)",
+          "最终DNS": "adguard-dns (新增AdGuard DNS兜底，自带广告过滤)",
+          "新增DNS服务器": "AdGuard UDP DNS (dns.adguard.com:53)",
+          "特殊DNS规则": "connectivitycheck.gstatic.com -> fakeip_server"
+        }
+      },
+
+      "6_DNS_缓存配置": {
+        "本地文件版": {
+          "cache_capacity": 4096,
+          "说明": "较小缓存，适合低内存设备"
+        },
+        "订阅链接版": {
+          "cache_capacity": 4096,
+          "说明": "基础缓存大小"
+        },
+        "优化版": {
+          "cache_capacity": 65536,
+          "说明": "增大16倍缓存，提升DNS查询性能"
+        },
+        "修复版": {
+          "cache_capacity": 65536,
+          "说明": "同优化版，大缓存"
+        }
+      },
+
+      "7_路由规则顺序和内容": {
+        "本地文件版": {
+          "规则数量": 12,
+          "IPv6拒绝位置": "规则4 (较早)",
+          "应用直连": "无",
+          "微信DNS直连": "无",
+          "FakeIP段路由": "无",
+          "应用代理": "无",
+          "彩云天气处理": "gather.colorfulclouds.net 被拒绝 (广告规则)",
+          "Google连通检测": "无特殊处理"
+        },
+        "订阅链接版": {
+          "规则数量": 12,
+          "IPv6拒绝位置": "规则4 (较早)",
+          "应用直连": "无",
+          "微信DNS直连": "无",
+          "FakeIP段路由": "无",
+          "应用代理": "无",
+          "彩云天气处理": "gather.colorfulclouds.net 被拒绝",
+          "Google连通检测": "无特殊处理"
+        },
+        "优化版": {
+          "规则数量": 20,
+          "IPv6拒绝位置": "规则17 (靠后)",
+          "新增规则": [
+            "package_name 国内应用直连 (微信/QQ/钉钉/支付宝/网易云)",
+            "dns.weixin.qq.com.cn 直连",
+            "198.18.0.0/15 FakeIP段走代理",
+            "package_name 代理应用 (Telegram/YouTube)"
+          ],
+          "彩云天气处理": "gather.colorfulclouds.net 在广告规则中一起被拒绝"
+        },
+        "修复版": {
+          "规则数量": 22,
+          "IPv6拒绝位置": "规则19 (最后)",
+          "保留优化版新增": "全部保留",
+          "新增/调整规则": [
+            "abyss.cyapi.cn 和 ad.cyapi.cn 单独拒绝",
+            "gather.colorfulclouds.net 改为走代理 (不解)",
+            "connectivitycheck.gstatic.com 走代理",
+            "IPv6拒绝规则移至最后"
+          ],
+          "彩云天气处理": "分离处理 (广告域名拒绝，数据收集走代理)"
+        }
+      },
+
+      "8_出站默认策略": {
+        "本地文件版": {
+          "Google FCM": "无默认 (需手动选择)",
+          "Apple": "无默认",
+          "FINAL": "无此出站"
+        },
+        "订阅链接版": {
+          "Google FCM": "无默认",
+          "Apple": "无默认",
+          "FINAL": "无此出站"
+        },
+        "优化版": {
+          "Google FCM": "无默认 (需手动选择)",
+          "Apple": "无默认 (需手动选择)",
+          "FINAL": "默认: ❌ REJECT-DROP (未匹配流量默认拒绝)"
+        },
+        "修复版": {
+          "Google FCM": "默认: 📦 sing-box (优先代理确保推送)",
+          "Apple": "默认: 🇨🇳 DIRECT (Apple国内服务直连更快)",
+          "FINAL": "默认: ❌ REJECT-DROP"
+        }
+      }
+    },
+
+    "版本演进路线": {
+      "阶段1_基础": {
+        "版本": "订阅链接版",
+        "特点": "功能完整的基础配置，满足日常使用",
+        "不足": [
+          "广告过滤较弱 (仅1个规则集)",
+          "没有应用级别的分流",
+          "没有最终安全兜底",
+          "DNS缓存较小"
+        ]
+      },
+      "阶段2_增强": {
+        "版本": "优化版",
+        "基于": "订阅链接版",
+        "改进": [
+          "广告过滤增强 (4个规则集)",
+          "新增应用分流 (package_name)",
+          "新增 FINAL 安全兜底",
+          "FakeIP 分离优化性能",
+          "DNS 缓存 16倍提升",
+          "规则集 14->23 更精细覆盖"
+        ],
+        "风险": [
+          "FakeIP 可能导致部分应用异常",
+          "彩云天气被误伤"
+        ]
+      },
+      "阶段3_修复": {
+        "版本": "修复版",
+        "基于": "优化版",
+        "修复": [
+          "移除 FakeIP 分离 (避免潜在问题)",
+          "最终 DNS 改用 AdGuard (增强过滤+可靠性)",
+          "FCM 默认走代理 (确保推送稳定)",
+          "Apple 默认直连 (提升国内服务速度)",
+          "彩云天气数据收集走代理 (修复误伤)"
+        ],
+        "优势": "最稳定、最精细的配置版本"
+      }
+    },
+
+    "推荐选择": {
+      "普通用户": "修复版 (1.14.0-alpha.21.reF1nd修复版.json) - 最稳定，策略最合理",
+      "低内存设备": "订阅链接版 (DNS缓存4096，规则集少)",
+      "FakeIP爱好者": "优化版 (DNS泄露保护，性能优化)",
+      "本地节点测试": "本地文件版 (无订阅，手动管理节点)",
+      "高风险网络环境": "修复版 (FINAL默认REJECT-DROP，无规则匹配的流量一律拒绝)"
+    }
+  }
+}
