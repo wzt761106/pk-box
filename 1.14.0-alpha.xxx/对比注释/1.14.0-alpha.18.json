@@ -957,150 +957,315 @@
   }
 }
 
+```json
 {
-  // =========================================================================
-  // 三版配置差异总结与最佳实践建议
-  // 基于 1.14.0-alpha.20 精简版、优化版、卓越版
-  // =========================================================================
+  // =================================================================
+  // 1.14.0-alpha.18 四个版本配置差异总结
+  // =================================================================
+  //
+  // 注意: 此JSON为总结性文档，并非实际可运行的配置文件。
+  // 它用结构化方式对比了优化版、稳定版、强化版、精简版的核心差异。
+  //
+  // =================================================================
 
-  "版本对比总结": {
-    "核心定位": {
-      "精简版": "极简高效，最少配置最低维护。适合单节点、轻度用户、不喜欢折腾的稳定环境。",
-      "优化版": "均衡之选，兼顾性能、去广告、流媒体解锁。适合多数日常用户。",
-      "卓越版": "极致性能与灵活，多节点、多协议混合，全方位管控。适合极客、多设备网关。"
+  "版本概览": {
+    "优化版": {
+      "设计目标": "在保证代理稳定性的前提下，最大化国内网站（尤其AI平台）的访问速度",
+      "适用场景": "国内用户、AI开发者、追求低延迟体验",
+      "复杂度": "高",
+      "内存占用": "中等 (约200MB)"
     },
-
-    "一、DNS 解析体系差异": {
-      "精简版": {
-        "服务器数量": "仅4个（本地QUIC、Google DoT、FakeIP）",
-        "解析策略": "极简二分法：国内走本地QUIC，国外走Google DoT",
-        "特点": "无hosts预定义，无去广告DNS，解析路径最短，响应快",
-        "适用": "轻度使用、节点稳定、不担心DNS泄漏"
-      },
-      "优化版": {
-        "服务器数量": "7个（本地、hosts、阿里DoT/DoQ、Google DoH、AdGuard DoT、FakeIP）",
-        "解析策略": "四层过滤：hosts固定→国内阿里DoQ→规则分流→AdGuard过滤海外",
-        "特点": "有hosts防污染兜底，支持去广告DNS，FakeIP范围含IPv6",
-        "适用": "日常办公、视频、国内外混用"
-      },
-      "卓越版": {
-        "服务器数量": "12个（更多DNS供应商冗余）",
-        "解析策略": "精细五层：hosts→腾讯/阿里双DoH→规则集分段→Quad9/CF/AdGuard多选→FakeIP全面覆盖",
-        "特点": "DNS供应商冗余最多，IPv4_only策略避免IPv6不稳定，缓存容量25.6万条",
-        "适用": "极致稳定、多运营商、复杂网络环境"
-      }
+    "稳定版": {
+      "设计目标": "基于优化版微调，去除实验性功能，确保长期稳定运行",
+      "适用场景": "日常办公、对稳定性要求高于最新特性的用户",
+      "复杂度": "中高",
+      "内存占用": "中等 (约200MB)"
     },
-
-    "二、入站接口差异": {
-      "精简版": {
-        "接口": "TUN + 混合端口(7890)",
-        "TUN栈": "system",
-        "TUN网段": "172.19.0.1/30",
-        "说明": "最精简，单TUN单端口即可工作"
-      },
-      "优化版": {
-        "接口": "TUN + 混合端口(7890)",
-        "TUN栈": "mixed（system+gVisor混合，兼容性最佳）",
-        "TUN网段": "10.8.0.1/24",
-        "说明": "mixed栈在安卓/Linux等平台兼容性更优"
-      },
-      "卓越版": {
-        "接口": "TUN + 混合端口(7890) + HTTP(7891) + SOCKS5(7892) + Redirect(7893) + VMess入站(7897) + VLESS入站(7898)",
-        "TUN栈": "system",
-        "TUN网段": "10.8.0.1/24",
-        "说明": "最全面，可作二级代理、网关透明代理、接收外部连接"
-      }
+    "强化版": {
+      "设计目标": "集合最全面的去广告、隐私保护、分流规则，功能最强大",
+      "适用场景": "高级用户、追求极致隐私和内容过滤、设备性能较好",
+      "复杂度": "极高",
+      "内存占用": "高 (约400MB)"
     },
-
-    "三、出站节点与策略组差异": {
-      "精简版": {
-        "节点数量": "2个（pkpk01/02，仅VLESS+WS+TLS）",
-        "策略组": "6个（自动选择、AI、YouTube、Telegram、Proxy、direct）",
-        "自动选择": "urltest每5分钟切换，tolerance=50",
-        "特殊组": "有'♻️自动选择'、'🤖AI'、'▶️YouTube'、'📱Telegram'独立selector",
-        "说明": "策略组命名Emoji化，直观，适合媒体AI分流"
-      },
-      "优化版": {
-        "节点数量": "2个（pkpk01/02，VLESS+WS+TLS+高级TCP/UDP参数）",
-        "策略组": "5个（PROXY、AUTO、GLOBAL、CN、Final）",
-        "自动选择": "urltest每10分钟切换，tolerance=50，优化idle_timeout",
-        "节点参数": "增加tcp_fast_open、tcp_keep_alive、udp_fragment、packet_encoding等性能优化",
-        "说明": "策略组层级简洁，PROXY→AUTO→节点，手动可控"
-      },
-      "卓越版": {
-        "节点数量": "5+个（VLESS Reality/WS/gRPC、SS2022、VMess、Trojan多协议混合）",
-        "策略组": "7个（PROXY、🟢测速优先、🔵稳定优先、GLOBAL、CN、Final等）",
-        "自动选择": "双urltest：一个测速优先(10min,tolerance=100)，一个稳定优先(15min,tolerance=30)",
-        "节点协议": "包含Reality、gRPC、Shadowsocks2022等抗封锁协议",
-        "说明": "多协议冗余，双自动策略防止频繁切换，真实场景最可靠"
-      }
-    },
-
-    "四、路由规则深度差异": {
-      "精简版": {
-        "规则条目": "约12条，简单清晰",
-        "规则集数量": "10个远程规则集",
-        "主要路径": "geosite-cn直连 → geosite-!cn代理 → 广告拒绝",
-        "特点": "clash_mode兼容，有最终兜底auto_detect_interface",
-        "不足": "无国内App分流，无反诈，无QUIC/STUN阻断"
-      },
-      "优化版": {
-        "规则条目": "约30条，全面覆盖",
-        "规则集数量": "36个远程规则集（含FCM、OnePlus、应用分流、反诈）",
-        "主要路径": "广告/跟踪拒绝 → Apple/FCM/Android分流 → 社交媒体/AI代理 → 国内/私有直连 → QUIC/STUN阻断 → IPv6抑制 → 反诈规则",
-        "特点": "有package_name应用分流，有protocol级阻断，有IPv6流量抑制",
-        "说明": "规则集最多，覆盖最全，适合App级精细控制"
-      },
-      "卓越版": {
-        "规则条目": "约40条，更细致",
-        "规则集数量": "45+个远程规则集（增至netflix/spotify/github/discord/tiktok/paypal等单独分类）",
-        "主要路径": "同优化版 + 国内AI/CDN细化直连 + 更多海外服务单独分类 + 国内大厂App(微信/支付宝/网易云)强制直连",
-        "特点": "增加bilibili/小红书/快手/wps等国内服务domain_suffix直连",
-        "说明": "规则最精细，媒体/购物/社交各有专用规则集，分流最准确"
-      }
-    },
-
-    "五、实验性功能差异": {
-      "精简版": {
-        "cache_file": "仅store_fakeip",
-        "clash_api": "无secret密钥，无external_ui下载",
-        "debug": "无内存限制"
-      },
-      "优化版": {
-        "cache_file": "store_fakeip + store_dns，自定义cache_id",
-        "clash_api": "有secret密钥，external_ui可自动下载",
-        "debug": "gc_percent=100, memory_limit=400MB"
-      },
-      "卓越版": {
-        "cache_file": "同优化版",
-        "clash_api": "无自动下载UI，无secret密钥（与原版行为一致）",
-        "debug": "同优化版"
-      }
-    },
-
-    "六、性能与安全权衡": {
-      "精简版": {
-        "速度": "★★★★★ 极速，DNS路径短，规则少",
-        "安全": "★★★☆☆ 无广告过滤，无DoH，无去隐私",
-        "维护": "★★★★★ 极低，只需关注节点"
-      },
-      "优化版": {
-        "速度": "★★★★☆ 快速，DNS有hosts加速，规则适中",
-        "安全": "★★★★☆ 有去广告DNS，有反欺诈，有STUN阻断",
-        "维护": "★★★☆☆ 规则集需定期更新"
-      },
-      "卓越版": {
-        "速度": "★★★★☆ 快，但DNS多重查询可能略增延迟",
-        "安全": "★★★★★ 多层DNS过滤，多协议抗封锁，app级隐私控制",
-        "维护": "★★☆☆☆ 规则集最多，需确保所有远程源可用"
-      }
-    },
-
-    "迁移建议": {
-      "从精简到优化": "如果你开始觉得广告多、或者需要FCM推送/游戏加速，可升级。主要增加hosts和调整dns服务器。",
-      "从优化到卓越": "如果你有多个不同协议的节点，或需要在不同网络下自动选择最优DNS，或要做网关分流，可升级。引入多DNS供应商和双自动策略。",
-      "回退策略": "若卓越版因规则集过多导致更新缓慢，可手动删减rule_set条目，只保留proxy/cn/ai/games等核心集。",
-      "通用提示": "所有版本中的节点占位符(CF优选域名IP、uuid、节点域名等)都需替换为真实信息，否则无法连接。"
+    "精简版": {
+      "设计目标": "极度精简，只保留核心代理功能，追求最小资源占用",
+      "适用场景": "低配设备(如路由器)、对配置简洁度有要求、不需要复杂功能",
+      "复杂度": "低",
+      "内存占用": "极低"
     }
+  },
+
+  "核心差异对照表": {
+
+    "日志级别": {
+      "优化版": "trace (最详细，方便调试)",
+      "稳定版": "trace",
+      "强化版": "trace",
+      "精简版": "warn (仅输出警告和错误，减少日志写入)"
+    },
+
+    "NTP时间同步": {
+      "优化版": "ntp.aliyun.com",
+      "稳定版": "ntp.aliyun.com",
+      "强化版": "ntp.aliyun.com",
+      "精简版": "time.apple.com (可能在某些网络环境下更稳定)"
+    },
+
+    "DNS服务器": {
+      "优化版": [
+        "local (系统DNS)",
+        "hosts_fix (预定义hosts)",
+        "alidns-dot (阿里DNS over TLS)",
+        "alidns-quic (阿里DNS over QUIC)",
+        "ggdns (Google DNS over HTTPS，代理)",
+        "doh-ech (Google DNS with ECH，实验性)",
+        "fakeip (虚拟IP)"
+      ],
+      "稳定版": [
+        "local",
+        "hosts_fix",
+        "alidns-dot",
+        "alidns-quic",
+        "ggdns",
+        "fakeip"
+        // 移除了 doh-ech
+      ],
+      "强化版": [
+        "local",
+        "hosts_fix (新增 dns.adguard.com 解析)",
+        "alidns-dot",
+        "alidns-quic",
+        "ggdns",
+        "fakeip (新增 inet6_range)",
+        "adguard-dns (AdGuard DNS over TLS，用于过滤广告和跟踪器)"
+      ],
+      "精简版": [
+        "google (Google DNS over TLS，代理)",
+        "local (223.5.5.5 标准QUIC直连，无hosts预定义)",
+        "fakeip"
+        // 极简设计，无阿里DNS、无AdGuard DNS
+      ]
+    },
+
+    "DNS最终兜底": {
+      "优化版": "doh-ech (走ECH增强隐私的Google DNS)",
+      "稳定版": "ggdns (走普通代理的Google DNS)",
+      "强化版": "ggdns",
+      "精简版": "无final字段，由规则链决定"
+    },
+
+    "DNS规则特点": {
+      "优化版": [
+        "大量国内AI/内容平台域名显式指定阿里DNS，保证直连速度",
+        "使用 evaluate 规则对 .cn 域名进行智能评估",
+        "节点域名使用 doh-ech 解析，增强隐私",
+        "proxy/games/ai 规则集使用 client_subnet 重写，优化CDN节点选择"
+      ],
+      "稳定版": [
+        "与优化版类似的国内域名列表，但去掉了 evaluate 规则",
+        "去除了节点域名的特殊ECH解析",
+        "去除了 client_subnet 重写功能"
+      ],
+      "强化版": [
+        "新增多条广告/隐私过滤规则 (httpDNS, DNSreject, Ads)",
+        "proxy/games/ai 规则集先经 adguard-dns 过滤，再查 fakeip",
+        "非A/AAAA查询直接返回NOERROR，防止客户端等待",
+        "特定规则集(Filter, private)强制使用阿里DNS"
+      ],
+      "精简版": [
+        "仅基于Clash模式和规则集分流:",
+        "  - Direct模式 -> 本地DNS",
+        "  - Global模式 -> Google DNS",
+        "  - 中国域名(geosite-cn) -> 本地DNS",
+        "  - 其余A记录 -> fakeip",
+        "  - 所有AAAA记录 -> 本地DNS (避免IPv6代理问题)"
+      ]
+    },
+
+    "出站节点": {
+      "优化版": {
+        "选择器": "PROXY (包含 AUTO, 🚀 CF-优选-Visa, 🚀 CF-优选-DO, DIRECT)",
+        "测速URL": "http://cp.cloudflare.com/",
+        "节点参数": "基础TLS配置，alpn: http/1.1, ech: false"
+      },
+      "稳定版": {
+        "选择器": "PROXY (包含 AUTO, 🇺🇸 pkpk01, 🇺🇸 pkpk02, DIRECT)",
+        "测速URL": "http://www.gstatic.com/generate_204",
+        "节点参数": "增加 max_early_data(0-RTT) 和 early_data_header_name，连接更快"
+      },
+      "强化版": {
+        "选择器": "与稳定版相同",
+        "测速URL": "与稳定版相同",
+        "节点参数": "在稳定版基础上增加: tcp_fast_open, tcp_keep_alive, udp_fragment, packet_encoding: xudp。UDP和TCP连接性能更强"
+      },
+      "精简版": {
+        "选择器": "无总PROXY选择器，而是按服务细分: ♻️ 自动选择, 🤖 AI, ▶️ YouTube, 📱 Telegram, ✈️ Proxy",
+        "测速URL": "http://www.gstatic.com/generate_204 (间隔仅5m，切换更灵敏)",
+        "节点参数": "与稳定版相同"
+      }
+    },
+
+    "路由规则特点": {
+      "优化版": [
+        "Final出站默认: REJECT-DROP (安全优先，未匹配规则即拒绝)",
+        "Wi-Fi SSID/BSSID 规则，根据连接的网络切换代理",
+        "quic 443 端口直接拒绝",
+        "包名路由: YouTube, Telegram",
+        "Google FCM 域名指定代理"
+      ],
+      "稳定版": [
+        "Final出站默认: PROXY (宽松策略，未匹配规则走代理)",
+        "与优化版类似，但额外增加了特定IP(1.1.1.1)和域名(www.google.com, www.apple.com)的直连规则示例"
+      ],
+      "强化版": [
+        "Final出站默认: PROXY",
+        "规则数量暴增，新增大量规则集:",
+        "  - 去广告: Ads, adobe",
+        "  - 隐私: httpDNS, DNSreject",
+        "  - 服务: fcm, Android, Apple, OnePlus",
+        "  - 媒体: telegram, youtube, instagram, GlobalMedia",
+        "  - 代理: gfw, Proxy",
+        "Clash模式兼容 (Global -> PROXY, Direct -> DIRECT)",
+        "拒绝非中国IPv6地址，防止IPv6连接问题",
+        "route-options 优化UDP连接性能"
+      ],
+      "精简版": [
+        "Final出站默认: ♻️ 自动选择",
+        "极简规则，只保留核心:",
+        "  - Clash模式适配",
+        "  - DNS劫持",
+        "  - 广告拦截 (geosite-category-ads-all)",
+        "  - 中国流量直连 (geosite-cn + geoip-cn)",
+        "  - AI服务分流至 🤖 AI 选择器",
+        "  - YouTube/Netflix 分流至 ▶️ YouTube 选择器",
+        "  - Telegram 分流至 📱 Telegram 选择器",
+        "  - 其余非中国流量走 ♻️ 自动选择",
+        "无Wi-Fi规则、无包名路由、无QUIC拦截等高级功能"
+      ]
+    },
+
+    "规则集更新与格式": {
+      "优化版": {
+        "格式": "binary (.srs) 为主，anti_fraud为source",
+        "更新间隔": "48h",
+        "CDN": "cdn.jsdelivr.net"
+      },
+      "稳定版": {
+        "格式": "binary (.srs) 为主",
+        "更新间隔": "48h",
+        "CDN": "cdn.jsdelivr.net"
+      },
+      "强化版": {
+        "格式": "binary (.srs) 和 source 混合",
+        "更新间隔": "48h",
+        "CDN": "混合使用 GitHub raw, cdn.jsdelivr.net, MetaCubeX规则集",
+        "新增规则集": [
+          "telegram_ip (MetaCubeX)",
+          "Proxy (geosite-geolocation-!cn)",
+          "gfw (MetaCubeX)",
+          "Filter (fakeip-filter)",
+          "DNSreject (AdGuardSDNSFilter)",
+          "httpDNS (BlockHttpDNS)",
+          "Ads (DustinWin ads)",
+          "adobe (MetaCubeX)",
+          "Apple (sing-geosite)",
+          "fcm (GoogleFCM)",
+          "Android (Android)",
+          "telegram (sing-geosite)",
+          "instagram (sing-geosite)",
+          "Google (senshinya)",
+          "GlobalMedia (MetaCubeX entertainment)",
+          "Applications (DustinWin)",
+          "OnePlus (senshinya)"
+        ]
+      },
+      "精简版": {
+        "格式": "source (json)，未指定format，省去binary解析开销",
+        "更新间隔": "24h (更频繁地获取最新规则)",
+        "CDN": "gh-proxy.com (通过代理下载，避免直连GitHub失败)",
+        "规则集": [
+          "geosite-category-ads-all (广告)",
+          "geosite-cn (中国域名)",
+          "geoip-cn (中国IP)",
+          "geosite-openai (AI)",
+          "geosite-anthropic (AI)",
+          "geosite-google-gemini (AI)",
+          "geosite-youtube (视频)",
+          "geosite-netflix (视频)",
+          "geosite-telegram (通讯)",
+          "geosite-geolocation-!cn (非中国)"
+        ]
+      }
+    },
+
+    "Web面板与实验性功能": {
+      "优化版": {
+        "面板URL": "Metacubexd latest zip",
+        "debug.gc_percent": 50,
+        "debug.memory_limit": "200MB"
+      },
+      "稳定版": {
+        "面板URL": "Metacubexd latest zip",
+        "debug.gc_percent": 50,
+        "debug.memory_limit": "200MB"
+      },
+      "强化版": {
+        "面板URL": "Metacubexd v1.245.1 tgz (固定版本，更稳定)",
+        "debug.gc_percent": 100,  // 更激进的GC策略
+        "debug.memory_limit": "400MB" // 允许使用更多内存以承载大量规则集
+      },
+      "精简版": {
+        "面板URL": "无external_ui_download_url，需手动放置面板文件",
+        "debug配置": "无，使用内核默认值 (内存占用最小)"
+      }
+    },
+
+    "连接与下载优化": {
+      "优化版": {
+        "http_clients.detour": "PROXY",
+        "http_clients.version": "未指定 (默认HTTP/1.1)"
+      },
+      "稳定版": {
+        "http_clients.detour": "PROXY",
+        "http_clients.version": "2 (HTTP/2，连接复用，效率更高)"
+      },
+      "强化版": {
+        "http_clients.detour": "PROXY",
+        "http_clients.version": "2"
+      },
+      "精简版": {
+        "http_clients.detour": "♻️ 自动选择",
+        "http_clients.version": "2"
+      }
+    },
+
+    "TUN栈与地址": {
+      "优化版": {
+        "address": "10.8.0.1/24",
+        "stack": "mixed (混合栈，兼容性好)"
+      },
+      "稳定版": {
+        "address": "10.8.0.1/24",
+        "stack": "mixed"
+      },
+      "强化版": {
+        "address": "10.8.0.1/24",
+        "stack": "mixed"
+      },
+      "精简版": {
+        "address": "172.19.0.1/30 (更小的子网，仅2个可用IP)",
+        "stack": "system (使用系统网络栈，资源占用更低)",
+        "platform.http_proxy": "开启 (为不支持TUN的应用提供HTTP代理)"
+      }
+    }
+  },
+
+  "版本选择建议": {
+    "如果你追求最快的国内网站访问速度，特别是AI平台": "选择「优化版」",
+    "如果你希望配置稳定，不折腾，日常使用不出错": "选择「稳定版」",
+    "如果你是高级用户，想要最强的去广告和隐私保护，且设备性能足够": "选择「强化版」",
+    "如果你设备性能差(如硬路由)，或只需要简单翻墙，喜欢一目了然的配置": "选择「精简版」",
+    "如果你想深入理解sing-box配置": "四个版本都看看，它们的差异就是最好的学习材料"
   }
 }
+```
