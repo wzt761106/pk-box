@@ -135,7 +135,7 @@
         "tag": "adguard-dns",
         "detour": "PROXY",
         "domain_resolver": "hosts_fix",
-        "server": "107.172.252.185",     // 这是一个自建或私人 AdGuard 服务器
+        "server": "dns.adguard.com",     // AdGuard公开dns地址
         "server_port": 53
       },
       {
