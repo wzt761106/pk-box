@@ -407,7 +407,7 @@
       "outbounds": [
         "🟢 自动-测速",
         "🔵 自动-稳定",
-
+        "pkpk01",
         "DIRECT"
       ],
       "default": "🟢 自动-测速"
@@ -416,7 +416,7 @@
       "type": "urltest",
       "tag": "🟢 自动-测速",
       "outbounds": [
-
+        "pkpk01"
       ],
       "url": "http://www.gstatic.com/generate_204",
       "interval": "10m0s",
@@ -427,7 +427,7 @@
       "type": "urltest",
       "tag": "🔵 自动-稳定",
       "outbounds": [
-
+        "pkpk01"
       ],
       "url": "http://www.gstatic.com/generate_204",
       "interval": "15m0s",
@@ -465,8 +465,34 @@
     {
       "type": "block",
       "tag": "REJECT-DROP"
+    },
+    {
+      "type": "vless",
+      "tag": "pkpk01",
+      "connect_timeout": "5s",
+      "tcp_fast_open": true,
+      "tcp_keep_alive": "30s",
+      "tcp_keep_alive_interval": "5s",
+      "udp_fragment": true,
+      "domain_resolver": "alidns-quic",
+      "server": "域名或IP",
+      "server_port": 端口,
+      "uuid": "uuid",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "addons.mozilla.org",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "密钥"
+        }
+      },
+      "packet_encoding": "xudp"
     }
-    
   ],
   "route": {
     "rules": [
