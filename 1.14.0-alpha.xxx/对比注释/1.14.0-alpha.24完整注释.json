@@ -1,0 +1,2636 @@
+{
+  "##############################": "sing-box 核心配置文件 v1.14.0-alpha.24 优化版 - 完整注释版",
+  "##############################_说明": "本文件是 sing-box 代理客户端的完整配置，sing-box 是一个通用的代理工具平台，支持多种协议。",
+  "##############################_用途": "用于科学上网/网络代理，支持TUN模式（虚拟网卡）、HTTP/SOCKS/混合代理入口，VLESS+REALITY/WS等多种出站协议。",
+  "##############################_修改说明": "所有敏感信息（UUID、密钥、域名、端口、路径等）均已修改为示例值，请替换为实际值后使用。",
+  "##############################_版本": "sing-box 1.14.0-alpha.24",
+
+  "============================================": "第1部分：log - 日志配置",
+  "============================================_说明": "控制 sing-box 运行时的日志输出级别和格式。",
+
+  "log": {
+    "_整体说明": "日志模块配置，控制程序运行时的日志行为。",
+    "level": {
+      "_value": "trace",
+      "_说明": "日志级别。可选值：trace(最详细) > debug > info > warn > error > fatal > panic(最简略)。trace会输出所有调试信息，适合排查问题，生产环境建议改为info或warn。",
+      "_疑惑": "为何使用trace级别？这会大量消耗性能和磁盘，是否仅开发调试用？",
+      "_回答": "trace级别通常用于开发调试或首次部署时排查连接问题，稳定后应降为info以提升性能。"
+    },
+    "timestamp": {
+      "_value": true,
+      "_说明": "是否在日志中显示时间戳。true=显示精确时间，方便定位问题发生的时间点。",
+      "_注意": "如果使用systemd等日志管理器（自带时间戳），可设为false减少冗余。"
+    }
+  },
+
+  "============================================": "第2部分：dns - DNS解析配置",
+  "============================================_说明": "DNS是网络代理的核心组件之一，负责域名解析、DNS防污染、FakeIP等。sing-box内置完整的DNS服务器功能。",
+
+  "dns": {
+    "_整体说明": "DNS模块配置，sing-box内置DNS服务器，支持多种上游协议（UDP/DoH/DoT/DoQ/FakeIP），通过规则灵活分流。",
+
+    "servers": {
+      "_整体说明": "DNS上游服务器列表，按顺序匹配规则使用。每个服务器有type（类型）、tag（标签）、detour（出站路由）等属性。",
+
+      "0_local": {
+        "type": {
+          "_value": "local",
+          "_说明": "本地DNS类型，使用系统自带的DNS解析（读取/etc/resolv.conf或系统DNS设置）。",
+          "_优点": "无需配置上游服务器地址，自动使用网络接口的DNS。"
+        },
+        "tag": {
+          "_value": "local",
+          "_说明": "该DNS服务器的标签名，供DNS规则和出站引用。"
+        },
+        "neighbor_domain": {
+          "_value": [".local", ".lan"],
+          "_说明": "邻居域名后缀列表。匹配这些后缀的域名优先使用此DNS解析。.local常用于mDNS/Bonjour局域网服务发现，.lan常用于家庭路由器局域网域名。",
+          "_场景": "访问局域网内设备如打印机、NAS时不用走代理DNS。"
+        }
+      },
+
+      "1_hosts_fix": {
+        "_整体说明": "hosts类型DNS，相当于本地/etc/hosts文件，手动指定域名→IP映射。用于DNS污染的域名直连。",
+        "type": {
+          "_value": "hosts",
+          "_说明": "静态hosts映射DNS，优先级高于远程DNS查询。"
+        },
+        "tag": {
+          "_value": "hosts_fix",
+          "_说明": "标签名，fix表示用于修复DNS污染。被其他DNS服务器通过domain_resolver引用。"
+        },
+        "predefined": {
+          "_整体说明": "预定义的域名→IP映射表，确保这些重要DNS服务商域名能正确解析，防止DNS递归污染。",
+
+          "dns.huaweicloud.com": {
+            "_value": ["180.163.150.33", "180.163.151.33"],
+            "_说明": "华为云公共DNS域名→IP映射。180.163.150.33/151.33是华为云DNS服务器的真实IP。",
+            "_为何需要": "当上游DNS服务器用域名（如dns.alidns.com）时，需要先解析这个域名本身，若此时DNS已被污染，会导致死循环。hosts_fix通过硬编码绕过此问题。"
+          },
+          "dns.alidns.com": {
+            "_value": ["223.5.5.5", "223.6.6.6"],
+            "_说明": "阿里DNS（AliDNS）域名→IP映射。223.5.5.5/223.6.6.6是阿里公共DNS服务器IP。"
+          },
+          "dns.adguard.com": {
+            "_value": ["94.140.14.15", "94.140.15.16"],
+            "_说明": "AdGuard DNS域名→IP映射。AdGuard DNS提供广告过滤功能，94.140.14.15/15.16是其服务器IP。"
+          },
+          "doh.pub": {
+            "_value": ["1.12.12.21", "120.53.53.53"],
+            "_说明": "腾讯DNSPod（DoH）域名→IP映射。doh.pub是腾讯提供的公共DoH服务。1.12.12.21/120.53.53.53是其IP。"
+          },
+          "dns.google": {
+            "_value": ["8.8.8.8", "8.8.4.4"],
+            "_说明": "Google公共DNS域名→IP映射。8.8.8.8/8.8.4.4是全球最知名的公共DNS。"
+          },
+          "cloudflare-dns.com": {
+            "_value": ["104.16.248.249", "104.16.249.249"],
+            "_说明": "Cloudflare DNS域名→IP映射。1.1.1.2/1.0.0.2是其anycast IP，这里用的是通过CDN解析到的实际服务器IP。",
+            "_疑惑": "为何不用1.1.1.1/1.0.0.1而用CDN节点IP？",
+            "_回答": "Cloudflare的1.1.1.1是anycast IP，在某些网络环境下解析可能不稳定，使用CDN节点IP更加可靠。"
+          },
+          "mtalk.google.com": {
+            "_value": ["142.250.107.188", "142.251.170.188", "108.177.125.188"],
+            "_说明": "Google FCM推送服务域名→IP映射。mtalk.google.com用于Android的Firebase Cloud Messaging推送。",
+            "_为何需要": "FCM推送服务在国内经常被干扰，硬编码IP确保消息推送正常到达。"
+          },
+          "alt1-mtalk.google.com": {
+            "_value": "74.125.200.188",
+            "_说明": "Google FCM备用推送服务器1。单IP而非数组，sing-box也支持。"
+          },
+          "dl.google.com": {
+            "_value": "180.163.151.161",
+            "_说明": "Google下载服务器域名→IP。dl.google.com用于下载Chrome、Android SDK等。"
+          },
+          "dl.l.google.com": {
+            "_value": "180.163.150.33",
+            "_说明": "Google下载服务器备用域名→IP。"
+          }
+        }
+      },
+
+      "2_dns-udp": {
+        "type": {
+          "_value": "udp",
+          "_说明": "传统UDP 53端口DNS查询。最基础、兼容性最好的DNS协议。"
+        },
+        "tag": {
+          "_value": "dns-udp",
+          "_说明": "标签名，此DNS用于国内普通域名的解析。"
+        },
+        "detour": {
+          "_value": "DIRECT",
+          "_说明": "DNS查询走DIRECT出站（直连），不经过代理。国内DNS用直连即可。"
+        },
+        "server": {
+          "_value": "114.114.114.114",
+          "_说明": "国内知名公共DNS服务器（原360/电信）。已修改为示例值，请按需更换。",
+          "_原值": "114.114.114.114"
+        },
+        "server_port": {
+          "_value": 53,
+          "_说明": "DNS标准端口号53。UDP 53是DNS协议的默认端口。"
+        }
+      },
+
+      "3_alidns-quic": {
+        "type": {
+          "_value": "quic",
+          "_说明": "DNS over QUIC (DoQ)。使用QUIC协议（基于UDP的加密传输协议，HTTP/3的基础）进行DNS查询。相比传统UDP DNS，具有加密、防篡改的优势。"
+        },
+        "tag": {
+          "_value": "alidns-quic",
+          "_说明": "标签名，阿里DNS over QUIC。"
+        },
+        "detour": {
+          "_value": "DIRECT",
+          "_说明": "直连出站。阿里DNS在国内访问延迟低，直连即可。"
+        },
+        "domain_resolver": {
+          "_value": "hosts_fix",
+          "_说明": "解析dns.alidns.com域名时使用hosts_fix服务器（即硬编码的IP），防止域名解析本身被污染。",
+          "_关键": "这是防止DNS污染的关键设计——解析DNS服务器域名时使用静态hosts，不走网络查询。"
+        },
+        "server": {
+          "_value": "dns.alidns.com",
+          "_说明": "阿里DNS服务器域名。通过QUIC协议加密传输DNS查询。"
+        }
+      },
+
+      "4_tx-doh": {
+        "type": {
+          "_value": "https",
+          "_说明": "DNS over HTTPS (DoH)。使用HTTPS协议加密传输DNS查询，端口443，外观与普通HTTPS流量无异，难以被识别和阻断。"
+        },
+        "tag": {
+          "_value": "tx-doh",
+          "_说明": "标签名，腾讯DoH。"
+        },
+        "detour": {
+          "_value": "DIRECT",
+          "_说明": "直连。腾讯DoH在国内有节点。"
+        },
+        "domain_resolver": {
+          "_value": "hosts_fix",
+          "_说明": "使用hosts_fix解析doh.pub域名。"
+        },
+        "server": {
+          "_value": "doh.pub",
+          "_说明": "腾讯DNSPod的DoH服务域名，也称为"Public DNS over HTTPS"。"
+        }
+      },
+
+      "5_ali-doh": {
+        "type": {
+          "_value": "https",
+          "_说明": "DoH类型。阿里DNS over HTTPS。"
+        },
+        "tag": {
+          "_value": "ali-doh",
+          "_说明": "标签名，阿里DoH。"
+        },
+        "detour": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        },
+        "domain_resolver": {
+          "_value": "hosts_fix",
+          "_说明": "使用hosts_fix解析。"
+        },
+        "server": {
+          "_value": "dns.alidns.com",
+          "_说明": "阿里DoH服务器域名。"
+        }
+      },
+
+      "6_cf-dot": {
+        "type": {
+          "_value": "tls",
+          "_说明": "DNS over TLS (DoT)。使用TLS协议加密DNS，端口853。相比DoH使用独立端口，某些网络下可能被针对性干扰。"
+        },
+        "tag": {
+          "_value": "cf-dot",
+          "_说明": "标签名，Cloudflare DoT。"
+        },
+        "detour": {
+          "_value": "PROXY",
+          "_说明": "‼️走代理！Cloudflare在国内访问不稳定，必须走代理。与上面国内DNS用DIRECT形成对比。"
+        },
+        "domain_resolver": {
+          "_value": "hosts_fix",
+          "_说明": "使用hosts_fix解析cloudflare-dns.com域名。"
+        },
+        "server": {
+          "_value": "cloudflare-dns.com",
+          "_说明": "Cloudflare DNS over TLS 服务器域名。"
+        },
+        "server_port": {
+          "_value": 853,
+          "_说明": "DoT标准端口853。"
+        }
+      },
+
+      "7_quad9-doh": {
+        "type": {
+          "_value": "https",
+          "_说明": "DoH类型。Quad9 DNS（9.9.9.9）是一个注重安全和隐私的公共DNS，自动过滤恶意网站。"
+        },
+        "tag": {
+          "_value": "quad9-doh",
+          "_说明": "标签名，Quad9 DoH。"
+        },
+        "detour": {
+          "_value": "PROXY",
+          "_说明": "‼️走代理。Quad9是国外DNS服务，需代理访问。"
+        },
+        "domain_resolver": {
+          "_value": "hosts_fix",
+          "_说明": "使用hosts_fix解析。"
+        },
+        "server": {
+          "_value": "dns.quad9.net",
+          "_说明": "Quad9 DoH服务器域名。"
+        }
+      },
+
+      "8_doh-ech": {
+        "_整体说明": "DoH with ECH (Encrypted Client Hello)。ECH是TLS 1.3的扩展，加密ClientHello中的SNI字段，防止中间设备通过SNI识别访问的目标域名。",
+        "type": {
+          "_value": "https",
+          "_说明": "DoH类型。"
+        },
+        "tag": {
+          "_value": "doh-ech",
+          "_说明": "标签名。"
+        },
+        "detour": {
+          "_value": "PROXY",
+          "_说明": "走代理访问。"
+        },
+        "domain_resolver": {
+          "_value": "hosts_fix",
+          "_说明": "使用hosts_fix解析。"
+        },
+        "server": {
+          "_value": "dns.cloudflare.com",
+          "_说明": "Cloudflare的另一个DoH域名（不同于cloudflare-dns.com）。支持ECH。"
+        }
+      },
+
+      "9_fakeip": {
+        "_整体说明": "FakeIP（假IP）DNS。这是代理工具的核心优化技术——将需要代理的域名返回一个虚假的IP地址（在198.18.0.0/15范围内），同时记录域名→假IP的映射。后续流量通过假IP路由到代理，sing-box再从映射中恢复真实域名进行代理连接。",
+        "_优点": "1) 避免DNS泄露；2) 减少DNS查询次数；3) 使域名分流在IP层也能生效。",
+        "type": {
+          "_value": "fakeip",
+          "_说明": "FakeIP DNS类型。需要注意的是FakeIP返回的IP不是真实的。"
+        },
+        "tag": {
+          "_value": "fakeip",
+          "_说明": "标签名。"
+        },
+        "inet4_range": {
+          "_value": "198.18.0.0/15",
+          "_说明": "IPv4 FakeIP地址范围。198.18.0.0/15是RFC 2544规定的基准测试用保留地址段，不会与公网真实IP冲突。范围：198.18.0.0 ~ 198.19.255.255，约13万个IP。",
+          "_疑惑": "为什么选择198.18.0.0/15而不是其他保留地址段？",
+          "_回答": "198.18.0.0/15是RFC 2544规定的网络基准测试专用段，不会在公网路由，也不会与局域网地址冲突（不像10.0.0.0/8等），是最佳选择。"
+        },
+        "inet6_range": {
+          "_value": "fc00::/18",
+          "_说明": "IPv6 FakeIP地址范围。fc00::/7是IPv6唯一本地地址(ULA)，但这里只用/18子段，减少与真实ULA冲突的可能。"
+        }
+      }
+    },
+
+    "rules": {
+      "_整体说明": "DNS路由规则列表。按顺序从上到下匹配，命中即停止。每条规则定义匹配条件和匹配后使用的DNS服务器或执行的动作。",
+
+      "0_reject_beacons": {
+        "_整体说明": "规则0：拒绝Google的信标/遥测域名。",
+        "domain_suffix": {
+          "_value": ["beacons.gvt2.com", "beacons2.gvt2.com", "beacons3.gvt2.com"],
+          "_说明": "域名后缀匹配。gvt2.com是Google的信标(beacon)服务器，用于收集用户行为数据/遥测。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "直接拒绝DNS查询，返回错误。阻止这些域名的解析，保护隐私。"
+        }
+      },
+
+      "1_cn_rule_set": {
+        "rule_set": {
+          "_value": "cn",
+          "_说明": "引用预定义的规则集（在route.rule_set中定义）。cn规则集包含中国国内的域名。"
+        },
+        "server": {
+          "_value": "tx-doh",
+          "_说明": "国内域名使用腾讯DoH解析，速度快且准确。"
+        }
+      },
+
+      "2_private": {
+        "rule_set": {
+          "_value": "private",
+          "_说明": "private规则集，包含局域网/私有域名。"
+        },
+        "server": {
+          "_value": "dns-udp",
+          "_说明": "私有域名用UDP DNS直连解析，不走加密DNS。局域网域名加密DNS无法解析。"
+        }
+      },
+
+      "3_cn_domain_suffix": {
+        "domain_suffix": {
+          "_value": [".cn", ".com.cn"],
+          "_说明": "所有.cn和.com.cn后缀的域名。"
+        },
+        "server": {
+          "_value": "ali-doh",
+          "_说明": "国内域名使用阿里DoH解析。与.cn规则集有重叠但互补——有些国内域名可能不在规则集中，但.cn后缀一定属于国内。"
+        }
+      },
+
+      "4_steam_lancache": {
+        "domain_suffix": {
+          "_value": "lancache.steamcontent.com",
+          "_说明": "Steam局域网缓存服务器域名。lancache是一种局域网Steam游戏更新缓存方案，多人同时下载游戏时节省带宽。"
+        },
+        "server": {
+          "_value": "local",
+          "_说明": "使用本地DNS解析局域网缓存服务器地址。"
+        }
+      },
+
+      "5_local_domains": {
+        "domain_suffix": {
+          "_value": ["local", "lan", "home", "internal", "corp", "example.com"],
+          "_说明": "常见局域网/内网域名后缀。local=Bonjour/mDNS，lan=家庭路由器，home=家庭网络，internal/corp=企业内网，example.com=文档示例域名。"
+        },
+        "server": {
+          "_value": "local",
+          "_说明": "全部使用本地DNS解析。"
+        }
+      },
+
+      "6_msft_ncsi": {
+        "domain_suffix": {
+          "_value": ["msftncsi.com", "msftconnecttest.com"],
+          "_说明": "Microsoft NCSI（网络连接状态指示器）域名。Windows/macOS用这些域名检测网络连通性（如WiFi登录门户检测）。"
+        },
+        "server": {
+          "_value": "local",
+          "_说明": "本地解析，确保网络状态检测正常工作。"
+        }
+      },
+
+      "7_game_fakeip": {
+        "_整体说明": "游戏和下载相关域名使用FakeIP，让游戏流量走代理获得更好体验。",
+        "query_type": {
+          "_value": ["A", "AAAA"],
+          "_说明": "仅匹配A记录(IPv4)和AAAA记录(IPv6)查询，不匹配其他类型如MX(邮件)、TXT等。"
+        },
+        "domain_suffix": {
+          "_value": [
+            "steamcontent.com", "steamserver.net",
+            "epicgames.com", "gog.com",
+            "battle.net", "blizzard.com",
+            "origin.com", "ea.com",
+            "ubisoft.com", "rockstargames.com",
+            "play.google.com", "ggpht.com",
+            "googleusercontent.com", "android.com",
+            "app-measurement.com",
+            "firebaselogging.googleapis.com",
+            "firebaselogging-pa.googleapis.com"
+          ],
+          "_说明": "游戏平台(Steam/Epic/GOG/战网/EA/育碧/R星)和Google Play相关域名。这些服务在国内可能被限速或干扰，走FakeIP→代理可获得更好速度。"
+        },
+        "server": {
+          "_value": "fakeip",
+          "_说明": "使用FakeIP DNS，后续流量走代理。"
+        }
+      },
+
+      "8_google_services_fakeip": {
+        "query_type": {
+          "_value": ["A", "AAAA"],
+          "_说明": "仅匹配IPv4和IPv6地址查询。"
+        },
+        "domain_suffix": {
+          "_value": [
+            "google.com", "google.com.hk", "googleapis.com",
+            "gstatic.com", "ggpht.com",
+            "youtube.com", "ytimg.com", "googlevideo.com",
+            "twitter.com", "twimg.com",
+            "facebook.com", "fbcdn.net",
+            "instagram.com", "cdninstagram.com"
+          ],
+          "_说明": "Google全家桶 + 主流社交平台(Twitter/Facebook/Instagram)。这些服务在国内被封锁，必须走代理。FakeIP确保所有子域名都能正确路由到代理。"
+        },
+        "server": {
+          "_value": "fakeip",
+          "_说明": "使用FakeIP。"
+        }
+      },
+
+      "9_rule_set_fakeip": {
+        "query_type": {
+          "_value": ["A", "AAAA"],
+          "_说明": "仅IPv4/IPv6查询。"
+        },
+        "rule_set": {
+          "_value": ["telegram", "geosite-youtube", "instagram", "Proxy", "gfw", "ai", "games", "GlobalMedia"],
+          "_说明": "多个规则集组合：Telegram/YouTube/Instagram/代理列表/GFW列表/AI服务/游戏/全球媒体。这些都需要走代理。"
+        },
+        "server": {
+          "_value": "fakeip",
+          "_说明": "FakeIP。"
+        }
+      },
+
+      "10_adguard_ali": {
+        "rule_set": {
+          "_value": ["geosite_adguard", "geosite-category-ads-all"],
+          "_说明": "广告过滤规则集。来自AdGuard和社区维护的广告域名列表。"
+        },
+        "server": {
+          "_value": "ali-doh",
+          "_说明": "使用阿里DoH（非reject）。原因是：有些"广告"域名其实不是广告，或者需要解析后才知道是否广告。先用国内DNS正常解析，后续在路由层面通过规则集再reject。",
+          "_疑惑": "为什么不直接reject广告域名？",
+          "_回答": "DNS层面reject会导致某些正常服务异常。例如某些CDN域名被广告规则误伤，先正常解析再在路由层面精确拒绝更安全。"
+        }
+      },
+
+      "11_google_quad9": {
+        "rule_set": {
+          "_value": ["geosite-google", "geosite-youtube"],
+          "_说明": "Google和YouTube规则集。"
+        },
+        "server": {
+          "_value": "quad9-doh",
+          "_说明": "使用Quad9 DoH。Quad9安全性好，且在国外，解析Google/YouTube域名结果更准确（不会被国内DNS污染）。同时走PROXY出站。"
+        }
+      },
+
+      "12_globalmedia_cf": {
+        "rule_set": {
+          "_value": "GlobalMedia",
+          "_说明": "全球媒体规则集（Netflix/Disney+/HBO等流媒体）。"
+        },
+        "server": {
+          "_value": "cf-dot",
+          "_说明": "使用Cloudflare DoT解析。流媒体对DNS解析结果的地理位置敏感（影响CDN节点选择），使用国外DNS确保返回正确的流媒体CDN节点IP。"
+        }
+      },
+
+      "13_reject_non_ip": {
+        "_整体说明": "拒绝非A/AAAA的其他DNS查询（如MX邮件记录、TXT记录等）。减少不必要的DNS流量和潜在泄露。",
+        "query_type": {
+          "_value": ["A", "AAAA"],
+          "_说明": "匹配A和AAAA记录..."
+        },
+        "invert": {
+          "_value": true,
+          "_说明": "‼️取反！即匹配所有非A/AAAA的DNS查询类型。invert=true表示反向匹配。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝这些查询。"
+        },
+        "_疑惑": "会不会影响邮件客户端等功能？",
+        "_回答": "普通用户几乎不会用到MX/TXT/NS等记录查询（邮件客户端除外）。如果需要收发邮件，建议删除此规则或添加例外。"
+      },
+
+      "14_proxy_fakeip": {
+        "query_type": {
+          "_value": ["A", "AAAA"],
+          "_说明": "仅IPv4/IPv6查询。"
+        },
+        "rule_set": {
+          "_value": ["proxy", "games", "ai"],
+          "_说明": "代理/游戏/AI规则集。"
+        },
+        "server": {
+          "_value": "fakeip",
+          "_说明": "FakeIP DNS。"
+        },
+        "rewrite_ttl": {
+          "_value": 300,
+          "_说明": "重写DNS TTL为300秒（5分钟）。TTL决定了DNS缓存时间。设为300秒可在DNS变更时较快更新，同时保持一定缓存命中率。",
+          "_单位": "秒"
+        }
+      },
+
+      "15_ad_dns_predefined": {
+        "rule_set": {
+          "_value": ["httpDNS", "DNSreject", "Ads"],
+          "_说明": "广告/跟踪/HTTPDNS相关规则集。"
+        },
+        "action": {
+          "_value": "predefined",
+          "_说明": "返回预定义的响应，此处搭配rcode使用。"
+        },
+        "rcode": {
+          "_value": "NOERROR",
+          "_说明": "返回状态码NOERROR（表示查询成功但无结果）。这比reject更温和——应用程序不会报DNS错误，只是解析不到IP。",
+          "_对比": "reject=返回SERVFAIL错误码，应用程序会报"DNS解析失败"；predefined+NOERROR=返回空结果，应用程序默默放弃。"
+        }
+      },
+
+      "16_private_filter_quic": {
+        "rule_set": {
+          "_value": ["private", "Filter"],
+          "_说明": "私有域名和FakeIP过滤规则集。"
+        },
+        "server": {
+          "_value": "alidns-quic",
+          "_说明": "使用阿里DNS over QUIC解析。加密且国内速度快。"
+        }
+      },
+
+      "17_personal_domain_ech": {
+        "_整体说明": "个人节点域名的DNS解析（已修改）。此域名用于连接代理节点，必须走加密且可靠的DNS。",
+        "domain_suffix": {
+          "_value": "mynode.example.com",
+          "_说明": "⚠️已修改：个人节点域名。此域名用于连接代理服务器，必须正确解析。使用doh-ech(支持ECH加密的DoH)防止SNI泄露。",
+          "_原值": "pk1.372164885.xyz"
+        },
+        "server": {
+          "_value": "doh-ech",
+          "_说明": "使用支持ECH的Cloudflare DoH，最大程度保护DNS隐私。"
+        }
+      },
+
+      "18_reject_ad_domains": {
+        "domain": {
+          "_value": [
+            "*.doubleclick.net",
+            "*.googlesyndication.com",
+            "*.googleadservices.com",
+            "*.adservice.google.com",
+            "*.addthis.com",
+            "*.adnxs.com",
+            "*.adsrvr.org",
+            "*.casalemedia.com",
+            "*.rubiconproject.com",
+            "*.openx.net"
+          ],
+          "_说明": "通配符域名匹配（*匹配任意子域名）。这些是著名的广告/跟踪平台域名：DoubleClick(Google广告)、Google Syndication、AddThis(分享按钮跟踪)、AppNexus(广告交易)、OpenX等。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "直接拒绝这些广告域名的DNS查询，从根源阻断广告。"
+        }
+      },
+
+      "19_reject_ad_regex": {
+        "domain_regex": {
+          "_value": "^(ad|ads|advert|banner|sponsor|popup|tracker|analytics)\\.|doubleclick\\.|googleadservices\\.|googlesyndication\\.",
+          "_说明": "正则表达式匹配域名。匹配以ad/ads/advert/banner/sponsor/popup/tracker/analytics开头的域名，以及包含doubleclick/googleadservices/googlesyndication的域名。",
+          "_正则解析": "^表示开头，|表示或，\\.表示转义的点号。例如ad.doubleclick.net和ads.example.com都会被匹配。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝这些广告/跟踪域名。"
+        }
+      },
+
+      "20_reject_ad_ruleset": {
+        "rule_set": {
+          "_value": ["geosite_adguard", "geosite-category-ads-all"],
+          "_说明": "广告规则集再次出现。之前的配置是先解析再路由拒绝，这里直接DNS reject。双重保险确保广告被彻底屏蔽。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "DNS层面拒绝。"
+        }
+      },
+
+      "21_reject_svcb_https_ptr": {
+        "query_type": {
+          "_value": ["SVCB", "HTTPS", "PTR"],
+          "_说明": "SVCB/HTTPS记录（用于HTTP/3和ECH的服务绑定记录，可能泄露访问目标）；PTR记录（反向DNS查询，极少使用）。",
+          "_疑惑": "拒绝SVCB/HTTPS记录是否影响HTTP/3连接？",
+          "_回答": "可能影响部分网站的HTTP/3连接（如Google/YouTube）。如果遇到网站加载慢，可以注释掉此规则。但保留可防止通过HTTPS记录泄露ECH配置信息。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝这些查询类型。"
+        }
+      }
+    },
+
+    "final": {
+      "_value": "quad9-doh",
+      "_说明": "默认DNS服务器。当没有任何规则匹配时，使用Quad9 DoH（走代理）。这是安全的选择——未知域名优先使用国外安全DNS。"
+    },
+    "reverse_mapping": {
+      "_value": true,
+      "_说明": "启用反向DNS映射。当收到IP→域名的反查请求时，从FakeIP映射表和DNS缓存中查找对应域名。对FakeIP功能至关重要。"
+    },
+    "strategy": {
+      "_value": "prefer_ipv4",
+      "_说明": "DNS查询策略。prefer_ipv4=优先返回IPv4地址。可选：prefer_ipv6（优先IPv6）、ipv4_only（仅IPv4）、ipv6_only（仅IPv6）。大多数代理节点只支持IPv4，选择prefer_ipv4。"
+    },
+    "timeout": {
+      "_value": "3s",
+      "_说明": "DNS查询超时时间3秒。超过3秒未收到响应则判定失败，尝试下一个DNS服务器或返回错误。"
+    },
+    "cache_capacity": {
+      "_value": 256000,
+      "_说明": "DNS缓存容量。最多缓存256000条DNS记录。对于重度用户（FakeIP+大量域名），这个容量足够。",
+      "_单位": "条"
+    },
+    "client_subnet": {
+      "_value": "8.8.8.8/32",
+      "_说明": "⚠️已修改：ECS (EDNS Client Subnet)。向DNS服务器发送客户端子网信息，帮助CDN返回离用户最近的节点IP。此处设为公共DNS IP以隐藏真实IP。",
+      "_原值": "114.114.114.114/32",
+      "_注意": "设为公共IP可以防止DNS服务器通过ECS获取你的真实IP，但可能导致CDN节点选择不准。"
+    },
+    "optimistic": {
+      "_整体说明": "乐观DNS缓存。启用后，即使DNS缓存已过期，在后台异步刷新的同时仍返回过期结果，减少DNS延迟。",
+      "enabled": {
+        "_value": true,
+        "_说明": "启用乐观DNS缓存。"
+      },
+      "timeout": {
+        "_value": "1h",
+        "_说明": "乐观缓存超时1小时。超过1小时的过期缓存不再使用，必须等待刷新结果。",
+        "_单位": "h=小时"
+      }
+    }
+  },
+
+  "============================================": "第3部分：ntp - 网络时间协议配置",
+  "============================================_说明": "NTP用于同步系统时间。准确的时间对TLS证书验证和REALITY协议至关重要。",
+
+  "ntp": {
+    "_整体说明": "sing-box内置的NTP客户端，定期同步时间。",
+    "enabled": {
+      "_value": true,
+      "_说明": "启用NTP时间同步。‼️重要：REALITY协议依赖准确的时间戳，时间偏差太大会导致连接失败。"
+    },
+    "interval": {
+      "_value": "30m0s",
+      "_说明": "同步间隔30分钟。每30分钟向NTP服务器查询一次时间。",
+      "_格式": "Go语言Duration格式：30m0s = 30分钟0秒"
+    },
+    "server": {
+      "_value": "ntp.aliyun.com",
+      "_说明": "阿里云NTP服务器。国内访问延迟低且稳定。",
+      "_替代": "也可用 ntp.tencent.com、time.apple.com 等。"
+    },
+    "server_port": {
+      "_value": 123,
+      "_说明": "NTP协议标准端口号123。"
+    },
+    "detour": {
+      "_value": "DIRECT",
+      "_说明": "直连出站。NTP流量无需走代理。"
+    }
+  },
+
+  "============================================": "第4部分：http_clients - HTTP客户端配置",
+  "============================================_说明": "定义用于远程规则集下载和更新的HTTP客户端参数。",
+
+  "http_clients": [
+    {
+      "_整体说明": "默认HTTP客户端配置。用于下载远程规则集（.srs文件）。",
+      "tag": {
+        "_value": "default",
+        "_说明": "标签名default，被route.rule_set中的http_client引用。"
+      },
+      "version": {
+        "_value": 2,
+        "_说明": "HTTP客户端版本。version 2 使用更新版本的HTTP客户端实现，性能更好。",
+        "_可选": "1或2。"
+      },
+      "detour": {
+        "_value": "PROXY",
+        "_说明": "‼️走代理。远程规则集大多托管在GitHub/jsDelivr等国外平台，需要代理才能稳定下载。"
+      },
+      "stream_receive_window": {
+        "_value": 0,
+        "_说明": "QUIC流接收窗口大小。0表示使用系统默认值。仅在使用QUIC传输时生效。"
+      },
+      "connection_receive_window": {
+        "_value": 0,
+        "_说明": "QUIC连接接收窗口大小。0=系统默认。"
+      }
+    }
+  ],
+
+  "============================================": "第5部分：inbounds - 入站配置（流量入口）",
+  "============================================_说明": "入站定义了sing-box如何接收流量。支持TUN虚拟网卡、HTTP/SOCKS代理、混合代理等多种模式。",
+
+  "inbounds": [
+    {
+      "_整体说明": "TUN模式入站——创建虚拟网卡，接管系统所有流量。这是最强大透明的代理方式。",
+      "type": {
+        "_value": "tun",
+        "_说明": "TUN虚拟网卡模式。在系统层创建一个虚拟网络接口，通过路由规则将流量导入sing-box。无需逐个应用配置代理。"
+      },
+      "tag": {
+        "_value": "tun-in",
+        "_说明": "入站标签。"
+      },
+      "mtu": {
+        "_value": 1500,
+        "_说明": "MTU（最大传输单元）=1500字节。这是以太网标准MTU。TUN虚拟网卡的MTU应略小于物理网卡MTU以减少分片。",
+        "_注意": "如果遇到部分网站无法访问或连接卡顿，尝试降低MTU到1400或更小。"
+      },
+      "address": {
+        "_value": "172.19.0.1/24",
+        "_说明": "⚠️已修改：TUN虚拟网卡的IP地址和子网。172.19.0.1/24 表示网卡IP为172.19.0.1，子网掩码255.255.255.0。这个地址段不应与现有网络冲突。",
+        "_原值": "10.8.0.1/24"
+      },
+      "dns_mode": {
+        "_value": "hijack",
+        "_说明": "DNS劫持模式。hijack=拦截所有经过TUN的DNS请求（UDP 53端口），重定向到sing-box内置DNS服务器。确保所有DNS查询都经过配置的防污染DNS流程。"
+      },
+      "dns_address": {
+        "_value": "172.19.0.2",
+        "_说明": "⚠️已修改：DNS劫持后使用的虚拟DNS服务器地址。应用程序会认为DNS服务器在这个IP上，实际上被sing-box接管。",
+        "_原值": "10.8.0.2"
+      },
+      "auto_route": {
+        "_value": true,
+        "_说明": "自动配置路由规则。sing-box会自动添加路由表项，将流量引导到TUN虚拟网卡。无需手动配置iptables/nftables。"
+      },
+      "strict_route": {
+        "_value": true,
+        "_说明": "严格路由模式。防止路由环路——确保TUN流量不会被再次路由回TUN。建议始终开启。"
+      },
+      "stack": {
+        "_value": "system",
+        "_说明": "网络栈类型。system=使用操作系统原生TCP/IP栈，兼容性最好。可选gvisor(用户空间网络栈，更安全但性能略低)。"
+      }
+    },
+    {
+      "_整体说明": "混合代理入站——同时支持HTTP和SOCKS5代理协议。最常用的本地代理端口。",
+      "type": {
+        "_value": "mixed",
+        "_说明": "混合代理类型，同时监听HTTP代理和SOCKS5代理。一个端口搞定两种协议。"
+      },
+      "tag": {
+        "_value": "mixed-in",
+        "_说明": "入站标签。"
+      },
+      "listen": {
+        "_value": "127.0.0.1",
+        "_说明": "监听地址。127.0.0.1=仅本机访问，安全性最高。若需局域网其他设备使用，改为0.0.0.0。",
+        "_安全警告": "改为0.0.0.0会让局域网内所有设备都能使用你的代理，请谨慎！"
+      },
+      "listen_port": {
+        "_value": 2080,
+        "_说明": "⚠️已修改：混合代理端口。本机应用程序设置代理时使用此端口。浏览器插件(SwitchyOmega等)和系统代理设置指向 127.0.0.1:2080。",
+        "_原值": 7890
+      }
+    },
+    {
+      "_整体说明": "纯HTTP代理入站。单独提供HTTP代理（不支持SOCKS）。",
+      "type": {
+        "_value": "http",
+        "_说明": "HTTP代理类型。支持HTTP CONNECT隧道（用于HTTPS）和普通HTTP代理。"
+      },
+      "tag": {
+        "_value": "http-in",
+        "_说明": "入站标签。"
+      },
+      "listen": {
+        "_value": "127.0.0.1",
+        "_说明": "仅本机监听。"
+      },
+      "listen_port": {
+        "_value": 2081,
+        "_说明": "⚠️已修改：HTTP代理端口。",
+        "_原值": 7891
+      }
+    },
+    {
+      "_整体说明": "纯SOCKS5代理入站。SOCKS5支持UDP和认证，比HTTP代理更灵活。",
+      "type": {
+        "_value": "socks",
+        "_说明": "SOCKS5代理类型。支持TCP和UDP转发。"
+      },
+      "tag": {
+        "_value": "socks-in",
+        "_说明": "入站标签。"
+      },
+      "listen": {
+        "_value": "127.0.0.1",
+        "_说明": "仅本机监听。"
+      },
+      "listen_port": {
+        "_value": 2082,
+        "_说明": "⚠️已修改：SOCKS5代理端口。",
+        "_原值": 7892
+      }
+    },
+    {
+      "_整体说明": "透明代理（Redirect）入站。通过iptables/nftables REDIRECT规则将流量导入。",
+      "type": {
+        "_value": "redirect",
+        "_说明": "透明重定向代理类型。接收被iptables REDIRECT/TPROXY重定向的流量，无需应用程序配置代理。"
+      },
+      "tag": {
+        "_value": "redirect-in",
+        "_说明": "入站标签。"
+      },
+      "listen": {
+        "_value": "127.0.0.1",
+        "_说明": "仅本机监听。"
+      },
+      "listen_port": {
+        "_value": 2083,
+        "_说明": "⚠️已修改：透明代理端口。配合iptables规则使用。注意：如果只使用TUN模式，此入站实际上不会收到流量。",
+        "_原值": 7893,
+        "_疑惑": "已有TUN模式为何还需要redirect入站？",
+        "_回答": "TUN和redirect是两种不同的透明代理实现方式。TUN在更底层（IP层），redirect在传输层。有些场景下redirect更灵活（如只代理特定端口）。此配置同时提供两者作为备选。"
+      }
+    }
+  ],
+
+  "============================================": "第6部分：outbounds - 出站配置（代理节点和出口）",
+  "============================================_说明": "出站定义流量如何离开sing-box。包括直连(DIRECT)、代理节点(VLESS)、自动选择组等。",
+
+  "outbounds": [
+    {
+      "_整体说明": "直连出站——不经过任何代理，直接访问目标服务器。",
+      "type": {
+        "_value": "direct",
+        "_说明": "直连类型。流量直接从本机网卡出去，不经过代理服务器。"
+      },
+      "tag": {
+        "_value": "DIRECT",
+        "_说明": "标签名DIRECT。此名称被各处引用，不建议修改。"
+      },
+      "domain_resolver": {
+        "_value": "alidns-quic",
+        "_说明": "直连流量使用阿里DNS over QUIC解析域名。国内DNS解析国内域名最准确。"
+      }
+    },
+    {
+      "_整体说明": "代理选择器——手动选择使用哪个代理节点。这是用户交互的主要入口。",
+      "type": {
+        "_value": "selector",
+        "_说明": "选择器类型。在sing-box的Web UI/Clash API中显示为下拉选择框，用户可以手动切换节点。"
+      },
+      "tag": {
+        "_value": "PROXY",
+        "_说明": "标签名PROXY。核心选择器，被路由规则引用。"
+      },
+      "outbounds": {
+        "_value": [
+          "🟢 自动-测速",
+          "🔵 自动-稳定",
+          "pkpk01",
+          "pkpk02",
+          "pkpk03",
+          "pkpk04",
+          "pkpk05",
+          "DIRECT"
+        ],
+        "_说明": "可选出站列表。包含：自动测速组(选最快节点)、自动稳定组(选最稳定节点)、5个独立节点、以及直连。用户可在UI中切换。"
+      },
+      "default": {
+        "_value": "🟢 自动-测速",
+        "_说明": "默认使用自动测速组。启动后自动选择最快的节点。"
+      }
+    },
+    {
+      "_整体说明": "自动测速组(urltest)——自动检测所有候选节点，选择延迟最低的节点。",
+      "type": {
+        "_value": "urltest",
+        "_说明": "URL测试类型。定期向指定URL发起HTTP请求，测量每个节点的延迟，自动选择延迟最低的节点。"
+      },
+      "tag": {
+        "_value": "🟢 自动-测速",
+        "_说明": "标签名，使用emoji方便识别。绿色圆点=速度优先。"
+      },
+      "outbounds": {
+        "_value": ["pkpk01", "pkpk02", "pkpk03", "pkpk04", "pkpk05"],
+        "_说明": "候选节点列表（5个VLESS节点）。从此列表中选择最优节点。"
+      },
+      "url": {
+        "_value": "http://www.gstatic.com/generate_204",
+        "_说明": "测速URL。gstatic.com是Google的静态资源域名，generate_204返回HTTP 204 No Content，是最常用的代理连通性检测地址。优点：轻量（无响应体）、被广泛使用不易被特殊对待。",
+        "_替代": "也可用 http://cp.cloudflare.com/generate_204 或 http://www.gstatic.com/generate_204"
+      },
+      "interval": {
+        "_value": "10m0s",
+        "_说明": "测速间隔10分钟。每10分钟对所有候选节点测速一次，更新最优选择。"
+      },
+      "tolerance": {
+        "_value": 100,
+        "_说明": "容差100毫秒。如果当前最优节点和新测节点延迟差在100ms以内，不切换节点。避免频繁切换。",
+        "_单位": "毫秒"
+      },
+      "idle_timeout": {
+        "_value": "30m0s",
+        "_说明": "空闲超时30分钟。如果30分钟内此出站没有流量，停止测速以节省资源。有新连接时自动恢复。"
+      }
+    },
+    {
+      "_整体说明": "自动稳定组(urltest)——选择延迟最稳定的节点（方差最小），而非单纯延迟最低。",
+      "type": {
+        "_value": "urltest",
+        "_说明": "URL测试类型。与🟢自动-测速的区别在于容差值更小(30ms)，更倾向于保持连接稳定而非追求最低延迟。"
+      },
+      "tag": {
+        "_value": "🔵 自动-稳定",
+        "_说明": "标签名，蓝色圆点=稳定优先。"
+      },
+      "outbounds": {
+        "_value": ["pkpk01", "pkpk02", "pkpk03", "pkpk04", "pkpk05"],
+        "_说明": "候选节点列表。与测速组相同。"
+      },
+      "url": {
+        "_value": "http://www.gstatic.com/generate_204",
+        "_说明": "测速URL同上。"
+      },
+      "interval": {
+        "_value": "15m0s",
+        "_说明": "测速间隔15分钟。比测速组长，因为稳定性不需要频繁检测。"
+      },
+      "tolerance": {
+        "_value": 30,
+        "_说明": "容差仅30ms。远小于测速组的100ms，意味着一旦新节点比当前节点稳定（延迟方差更小），即使延迟略高也会切换。追求稳定性。"
+      },
+      "idle_timeout": {
+        "_value": "1h0m0s",
+        "_说明": "空闲超时1小时。比测速组长，减少频繁的测速消耗。"
+      }
+    },
+    {
+      "_整体说明": "全局选择器(GLOBAL)——一个简单的二选一选择器。",
+      "type": {
+        "_value": "selector",
+        "_说明": "选择器类型。"
+      },
+      "tag": {
+        "_value": "GLOBAL",
+        "_说明": "标签名。"
+      },
+      "outbounds": {
+        "_value": ["PROXY", "DIRECT"],
+        "_说明": "可选：PROXY(走代理)或DIRECT(直连)。全局模式切换用。"
+      },
+      "default": {
+        "_value": "PROXY",
+        "_说明": "默认走代理。"
+      }
+    },
+    {
+      "_整体说明": "国内选择器(CN)——控制国内流量走直连还是代理。",
+      "type": {
+        "_value": "selector",
+        "_说明": "选择器。"
+      },
+      "tag": {
+        "_value": "CN",
+        "_说明": "标签名。"
+      },
+      "outbounds": {
+        "_value": ["DIRECT", "PROXY"],
+        "_说明": "可选直连或代理。通常国内流量直连，但特殊情况下（如代理访问国内CDN）可切换。"
+      },
+      "default": {
+        "_value": "DIRECT",
+        "_说明": "默认直连。"
+      }
+    },
+    {
+      "_整体说明": "最终选择器(Final)——路由规则的兜底出站。",
+      "type": {
+        "_value": "selector",
+        "_说明": "选择器。"
+      },
+      "tag": {
+        "_value": "Final",
+        "_说明": "标签名。被route.final引用。"
+      },
+      "outbounds": {
+        "_value": ["PROXY", "DIRECT", "REJECT-DROP"],
+        "_说明": "可选：代理、直连或拒绝。未匹配任何规则的流量默认走代理（安全策略）。"
+      },
+      "default": {
+        "_value": "PROXY",
+        "_说明": "默认代理。未知流量走代理是最安全的选择——宁可慢一点，不能泄露隐私。"
+      }
+    },
+    {
+      "_整体说明": "拒绝出站——丢弃所有流量（无响应）。",
+      "type": {
+        "_value": "block",
+        "_说明": "阻塞类型。不同于reject（返回拒绝响应），block静默丢弃数据包，对端无法判断是被拒绝还是网络不通。"
+      },
+      "tag": {
+        "_value": "REJECT-DROP",
+        "_说明": "标签名。DROP强调静默丢弃。"
+      }
+    },
+
+    "========================================": "以下为5个VLESS代理节点配置（所有敏感信息已修改）",
+    "========================================_说明": "VLESS是V2Ray社区的轻量级传输协议，无加密（依赖TLS加密），性能优于VMess。配合REALITY/WebSocket等传输方式。",
+
+    {
+      "_整体说明": "节点1：VLESS + REALITY + Vision流控。REALITY是VLESS的高级TLS模式，使用真实网站的证书伪装，无需自备域名和证书，抗封锁能力强。",
+      "type": {
+        "_value": "vless",
+        "_说明": "VLESS协议。无加密轻量传输协议，加密由外层TLS提供。"
+      },
+      "tag": {
+        "_value": "pkpk01",
+        "_说明": "节点标签名。"
+      },
+      "server": {
+        "_value": "node1.example-proxy.net",
+        "_说明": "⚠️已修改：节点服务器地址（域名或IP）。VLESS服务端运行的服务器地址。",
+        "_原值": "pk5.372164885.xyz"
+      },
+      "server_port": {
+        "_value": 8443,
+        "_说明": "⚠️已修改：节点端口。REALITY通常使用443(HTTPS标准端口)或8443等常见端口进行伪装。",
+        "_原值": 7173
+      },
+      "uuid": {
+        "_value": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "_说明": "⚠️已修改：VLESS用户UUID。这是客户端的身份凭证，必须与服务端配置一致。格式为标准UUID v4（8-4-4-4-12位十六进制）。",
+        "_原值": "03c34f42-1a56-42eb-8204-a5f259adf57b",
+        "_安全": "请使用 uuidgen 或在线工具生成新的随机UUID，不要使用此示例值！"
+      },
+      "flow": {
+        "_value": "xtls-rprx-vision",
+        "_说明": "流控模式。xtls-rprx-vision是XTLS的Vision流控，提供更好的性能和伪装。仅在TLS+REALITY模式下使用。Vision是XTLS的最新流控版本，修复了之前版本的已知问题。"
+      },
+      "tls": {
+        "_整体说明": "TLS配置块（REALITY模式）。",
+        "enabled": {
+          "_value": true,
+          "_说明": "启用TLS。"
+        },
+        "server_name": {
+          "_value": "www.microsoft.com",
+          "_说明": "⚠️已修改：SNI（服务器名称指示）。REALITY使用此域名作为TLS握手中的SNI，让防火墙以为你在访问微软官网。应使用一个真实存在的、CDN加速的、支持TLS 1.3的国外大站域名。",
+          "_原值": "addons.mozilla.org",
+          "_选择原则": "选择Alexa排名靠前、支持TLS 1.3、与你服务器在同区域的网站域名。常用选择：www.microsoft.com, www.apple.com, www.amazon.com等。"
+        },
+        "utls": {
+          "_整体说明": "uTLS指纹伪装。模拟真实浏览器的TLS握手指纹，防止被通过TLS指纹识别出代理工具。",
+          "enabled": {
+            "_value": true,
+            "_说明": "启用uTLS指纹伪装。"
+          },
+          "fingerprint": {
+            "_value": "firefox",
+            "_说明": "模拟Firefox浏览器的TLS指纹。可选：chrome, safari, ios, android, firefox, random等。Firefox指纹较常见且变化较多。"
+          }
+        },
+        "reality": {
+          "_整体说明": "REALITY协议配置。REALITY是XTLS团队开发的新一代TLS伪装技术，无需域名和证书，利用目标网站的合法证书进行伪装。",
+          "enabled": {
+            "_value": true,
+            "_说明": "启用REALITY。"
+          },
+          "public_key": {
+            "_value": "AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABC",
+            "_说明": "⚠️已修改：REALITY公钥。这是服务端生成的公钥，客户端用此验证服务端身份。由服务端的私钥通过X25519算法生成。",
+            "_原值": "-eNfrsUN351vvRk8F-Auuhye5azNfwdvPD5YuOF3-ig",
+            "_安全": "必须与服务端配置的publicKey一致！请使用 sing-box generate reality-keypair 生成新的密钥对。"
+          }
+        }
+      },
+      "multiplex": {
+        "_整体说明": "多路复用(Mux)配置。在一个TLS连接上承载多个TCP流，减少握手次数，提升并发性能。使用h2mux协议（基于HTTP/2帧的多路复用）。",
+        "protocol": {
+          "_value": "h2mux",
+          "_说明": "多路复用协议。h2mux是sing-box自研的基于HTTP/2帧的复用协议，比smux性能更好。注意：服务端也必须支持h2mux。"
+        },
+        "max_connections": {
+          "_value": 16,
+          "_说明": "最大连接数16。最多建立16个到服务端的底层连接来承载多路复用流。",
+          "_疑惑": "pkpk01用max_connections而其他节点用max_streams，有什么区别？",
+          "_回答": "max_connections是底层连接数上限，max_streams是每条连接上的流数上限。pkpk01使用REALITY(Vision流控)，建议用max_connections限制连接数；其他WS节点用max_streams控制每条WS连接上的流数。两者最终效果类似但实现机制不同。"
+        },
+        "brutal": {
+          "_整体说明": "Brutal速率控制。基于TCP Brutal算法的拥塞控制，可以更激进地利用带宽。",
+          "up_mbps": {
+            "_value": 1000,
+            "_说明": "上行带宽限制1000 Mbps。这是乐观估计，实际取决于你的网络和服务端带宽。",
+            "_单位": "Mbps(兆比特每秒)"
+          },
+          "down_mbps": {
+            "_value": 1000,
+            "_说明": "下行带宽限制1000 Mbps。"
+          }
+        }
+      },
+      "packet_encoding": {
+        "_value": "xudp",
+        "_说明": "UDP over TCP编码方式。xudp是XTLS的UDP编码，通过TCP传输UDP数据包（用于DNS/QUIC/游戏等UDP流量），保持UDP的完整性和顺序。"
+      }
+    },
+    {
+      "_整体说明": "节点2：VLESS + WebSocket + TLS。通过WebSocket传输VLESS流量，伪装成普通的HTTPS WebSocket连接。",
+      "type": {
+        "_value": "vless",
+        "_说明": "VLESS协议。"
+      },
+      "tag": {
+        "_value": "pkpk02",
+        "_说明": "节点标签。"
+      },
+      "server": {
+        "_value": "node2.example-proxy.net",
+        "_说明": "⚠️已修改：节点服务器地址。",
+        "_原值": "pk1.372164885.xyz"
+      },
+      "server_port": {
+        "_value": 443,
+        "_说明": "端口443（HTTPS标准端口）。WebSocket over TLS通常使用443端口，与普通HTTPS流量外观一致，不易被识别。"
+      },
+      "uuid": {
+        "_value": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "_说明": "⚠️已修改：UUID。注意：所有5个节点使用相同UUID（服务端可配置多用户或相同用户）。",
+        "_原值": "03c34f42-1a56-42eb-8204-a5f259adf57b"
+      },
+      "tls": {
+        "_整体说明": "TLS配置（标准模式，非REALITY）。需要服务端有有效的TLS证书（如通过ACME/Let's Encrypt申请的证书）。",
+        "enabled": {
+          "_value": true,
+          "_说明": "启用TLS。"
+        },
+        "server_name": {
+          "_value": "node2.example-proxy.net",
+          "_说明": "⚠️已修改：TLS SNI。必须与服务器证书的域名一致。这里设为与server相同，是最简单的配置方式。",
+          "_原值": "pk1.372164885.xyz"
+        },
+        "utls": {
+          "_整体说明": "uTLS指纹伪装。",
+          "enabled": {
+            "_value": true,
+            "_说明": "启用。"
+          },
+          "fingerprint": {
+            "_value": "firefox",
+            "_说明": "模拟Firefox指纹。"
+          }
+        }
+      },
+      "multiplex": {
+        "_整体说明": "多路复用配置。",
+        "enabled": {
+          "_value": true,
+          "_说明": "启用多路复用。与pkpk01不同，这里显式设置enabled:true。"
+        },
+        "protocol": {
+          "_value": "h2mux",
+          "_说明": "h2mux复用协议。"
+        },
+        "max_streams": {
+          "_value": 16,
+          "_说明": "每条连接最大16个并发流。与pkpk01的max_connections不同，这是每条WS连接上的流数上限。"
+        },
+        "padding": {
+          "_value": true,
+          "_说明": "启用填充。在多路复用帧中添加随机填充数据，使流量特征更加随机，增加识别难度。轻微增加带宽开销。"
+        },
+        "brutal": {
+          "_整体说明": "Brutal速率控制。",
+          "up_mbps": {
+            "_value": 1000,
+            "_说明": "上行1000 Mbps。"
+          },
+          "down_mbps": {
+            "_value": 1000,
+            "_说明": "下行1000 Mbps。"
+          }
+        }
+      },
+      "transport": {
+        "_整体说明": "传输层配置（WebSocket）。",
+        "type": {
+          "_value": "ws",
+          "_说明": "WebSocket传输。将VLESS流量封装在WebSocket帧中，外观如同普通的WebSocket应用。"
+        },
+        "path": {
+          "_value": "/ws-proxy-path",
+          "_说明": "⚠️已修改：WebSocket路径。客户端和服务端必须使用相同的路径。使用一个看起来正常的路径作为伪装。",
+          "_原值": "/sba-vl",
+          "_建议": "不要使用有明显特征的路径如/xray、/vless等。建议使用看起来正常的路径如/api/v1、/ws、/stream等。"
+        },
+        "headers": {
+          "_整体说明": "自定义HTTP头。WebSocket握手时的额外HTTP头。",
+          "Host": {
+            "_value": "node2.example-proxy.net",
+            "_说明": "⚠️已修改：Host头。在WebSocket握手中发送的Host头。某些CDN/WAF根据Host头转发流量。必须与服务端配置匹配。",
+            "_原值": "pk1.372164885.xyz"
+          }
+        },
+        "max_early_data": {
+          "_value": 2560,
+          "_说明": "最大早期数据量2560字节。允许在WebSocket握手完成前发送数据（0-RTT），减少延迟。仅在支持早期数据的CDN(如Cloudflare)上有效。",
+          "_单位": "字节"
+        },
+        "early_data_header_name": {
+          "_value": "Sec-WebSocket-Protocol",
+          "_说明": "早期数据伪装头名称。将早期数据伪装成WebSocket子协议协商头，使其看起来像是正常的WebSocket握手。Sec-WebSocket-Protocol是WebSocket标准头，不会被拦截。"
+        }
+      }
+    },
+    {
+      "_整体说明": "节点3：VLESS + WebSocket + TLS，但server与server_name不同（CDN节点）。server是CDN边缘IP/域名，server_name是源站域名。这是典型的CDN代理配置。",
+      "type": {
+        "_value": "vless",
+        "_说明": "VLESS协议。"
+      },
+      "tag": {
+        "_value": "pkpk03",
+        "_说明": "节点标签。"
+      },
+      "server": {
+        "_value": "cdn-edge.example-cdn.net",
+        "_说明": "⚠️已修改：CDN边缘节点地址。使用CDN的域名而非源站域名，流量先到CDN再由CDN转发到源站。优点：隐藏源站IP、利用CDN加速、CDN IP段较大不易被封。",
+        "_原值": "www.visa.com"
+      },
+      "server_port": {
+        "_value": 443,
+        "_说明": "端口443（HTTPS）。"
+      },
+      "uuid": {
+        "_value": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "_说明": "⚠️已修改：UUID。",
+        "_原值": "03c34f42-1a56-42eb-8204-a5f259adf57b"
+      },
+      "tls": {
+        "enabled": {
+          "_value": true,
+          "_说明": "启用TLS。"
+        },
+        "server_name": {
+          "_value": "node2.example-proxy.net",
+          "_说明": "⚠️已修改：TLS SNI（源站域名）。TLS握手时发送此SNI，CDN根据SNI转发到正确的源站。server和server_name可以不同——server是CDN节点地址，server_name是源站身份。",
+          "_原值": "pk1.372164885.xyz"
+        },
+        "utls": {
+          "enabled": {
+            "_value": true,
+            "_说明": "启用uTLS。"
+          },
+          "fingerprint": {
+            "_value": "firefox",
+            "_说明": "Firefox指纹。"
+          }
+        }
+      },
+      "multiplex": {
+        "enabled": {
+          "_value": true,
+          "_说明": "启用多路复用。"
+        },
+        "protocol": {
+          "_value": "h2mux",
+          "_说明": "h2mux协议。"
+        },
+        "max_streams": {
+          "_value": 16,
+          "_说明": "每条连接最多16个流。"
+        },
+        "padding": {
+          "_value": true,
+          "_说明": "启用填充。"
+        },
+        "brutal": {
+          "up_mbps": {
+            "_value": 1000,
+            "_说明": "上行1000 Mbps。"
+          },
+          "down_mbps": {
+            "_value": 1000,
+            "_说明": "下行1000 Mbps。"
+          }
+        }
+      },
+      "transport": {
+        "type": {
+          "_value": "ws",
+          "_说明": "WebSocket传输。"
+        },
+        "path": {
+          "_value": "/ws-proxy-path",
+          "_说明": "⚠️已修改：WebSocket路径。",
+          "_原值": "/sba-vl"
+        },
+        "headers": {
+          "Host": {
+            "_value": "node2.example-proxy.net",
+            "_说明": "⚠️已修改：Host头。",
+            "_原值": "pk1.372164885.xyz"
+          }
+        },
+        "max_early_data": {
+          "_value": 2560,
+          "_说明": "最大早期数据2560字节。"
+        },
+        "early_data_header_name": {
+          "_value": "Sec-WebSocket-Protocol",
+          "_说明": "早期数据伪装头。"
+        }
+      }
+    },
+    {
+      "_整体说明": "节点4：VLESS + WebSocket + TLS。与节点2/3相似的配置，不同的server地址。",
+      "type": {
+        "_value": "vless",
+        "_说明": "VLESS协议。"
+      },
+      "tag": {
+        "_value": "pkpk04",
+        "_说明": "节点标签。"
+      },
+      "server": {
+        "_value": "node4.example-proxy.net",
+        "_说明": "⚠️已修改：节点服务器地址。",
+        "_原值": "cf.090227.xyz"
+      },
+      "server_port": {
+        "_value": 443,
+        "_说明": "端口443。"
+      },
+      "uuid": {
+        "_value": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "_说明": "⚠️已修改：UUID。",
+        "_原值": "03c34f42-1a56-42eb-8204-a5f259adf57b"
+      },
+      "tls": {
+        "enabled": {
+          "_value": true,
+          "_说明": "启用TLS。"
+        },
+        "server_name": {
+          "_value": "node2.example-proxy.net",
+          "_说明": "⚠️已修改：TLS SNI。",
+          "_原值": "pk1.372164885.xyz"
+        },
+        "utls": {
+          "enabled": {
+            "_value": true,
+            "_说明": "启用uTLS。"
+          },
+          "fingerprint": {
+            "_value": "firefox",
+            "_说明": "Firefox指纹。"
+          }
+        }
+      },
+      "multiplex": {
+        "enabled": {
+          "_value": true,
+          "_说明": "多路复用。"
+        },
+        "protocol": {
+          "_value": "h2mux",
+          "_说明": "h2mux。"
+        },
+        "max_streams": {
+          "_value": 16,
+          "_说明": "最大16个流。"
+        },
+        "padding": {
+          "_value": true,
+          "_说明": "填充。"
+        },
+        "brutal": {
+          "up_mbps": {
+            "_value": 1000,
+            "_说明": "1000 Mbps。"
+          },
+          "down_mbps": {
+            "_value": 1000,
+            "_说明": "1000 Mbps。"
+          }
+        }
+      },
+      "transport": {
+        "type": {
+          "_value": "ws",
+          "_说明": "WebSocket。"
+        },
+        "path": {
+          "_value": "/ws-proxy-path",
+          "_说明": "⚠️已修改：路径。",
+          "_原值": "/sba-vl"
+        },
+        "headers": {
+          "Host": {
+            "_value": "node2.example-proxy.net",
+            "_说明": "⚠️已修改：Host头。",
+            "_原值": "pk1.372164885.xyz"
+          }
+        },
+        "max_early_data": {
+          "_value": 2560,
+          "_说明": "早期数据。"
+        },
+        "early_data_header_name": {
+          "_value": "Sec-WebSocket-Protocol",
+          "_说明": "伪装头。"
+        }
+      }
+    },
+    {
+      "_整体说明": "节点5：VLESS + WebSocket + TLS。第5个节点，配置结构与节点2/3/4相同。",
+      "type": {
+        "_value": "vless",
+        "_说明": "VLESS协议。"
+      },
+      "tag": {
+        "_value": "pkpk05",
+        "_说明": "节点标签。"
+      },
+      "server": {
+        "_value": "node5.example-proxy.net",
+        "_说明": "⚠️已修改：节点服务器地址。",
+        "_原值": "372164885.xyz"
+      },
+      "server_port": {
+        "_value": 443,
+        "_说明": "端口443。"
+      },
+      "uuid": {
+        "_value": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "_说明": "⚠️已修改：UUID。",
+        "_原值": "03c34f42-1a56-42eb-8204-a5f259adf57b"
+      },
+      "tls": {
+        "enabled": {
+          "_value": true,
+          "_说明": "启用TLS。"
+        },
+        "server_name": {
+          "_value": "node2.example-proxy.net",
+          "_说明": "⚠️已修改：TLS SNI。",
+          "_原值": "pk1.372164885.xyz"
+        },
+        "utls": {
+          "enabled": {
+            "_value": true,
+            "_说明": "启用uTLS。"
+          },
+          "fingerprint": {
+            "_value": "firefox",
+            "_说明": "Firefox指纹。"
+          }
+        }
+      },
+      "multiplex": {
+        "enabled": {
+          "_value": true,
+          "_说明": "多路复用。"
+        },
+        "protocol": {
+          "_value": "h2mux",
+          "_说明": "h2mux。"
+        },
+        "max_streams": {
+          "_value": 16,
+          "_说明": "最大16个流。"
+        },
+        "padding": {
+          "_value": true,
+          "_说明": "填充。"
+        },
+        "brutal": {
+          "up_mbps": {
+            "_value": 1000,
+            "_说明": "1000 Mbps。"
+          },
+          "down_mbps": {
+            "_value": 1000,
+            "_说明": "1000 Mbps。"
+          }
+        }
+      },
+      "transport": {
+        "type": {
+          "_value": "ws",
+          "_说明": "WebSocket。"
+        },
+        "path": {
+          "_value": "/ws-proxy-path",
+          "_说明": "⚠️已修改：路径。",
+          "_原值": "/sba-vl"
+        },
+        "headers": {
+          "Host": {
+            "_value": "node2.example-proxy.net",
+            "_说明": "⚠️已修改：Host头。",
+            "_原值": "pk1.372164885.xyz"
+          }
+        },
+        "max_early_data": {
+          "_value": 2560,
+          "_说明": "早期数据。"
+        },
+        "early_data_header_name": {
+          "_value": "Sec-WebSocket-Protocol",
+          "_说明": "伪装头。"
+        }
+      }
+    }
+  ],
+
+  "============================================": "第7部分：route - 路由配置",
+  "============================================_说明": "路由是sing-box的核心，决定每一条流量（按域名/IP/协议/应用等匹配）走哪个出站（直连/代理/拒绝）。",
+
+  "route": {
+    "_整体说明": "路由模块。包含规则列表(rules)、规则集(rule_set)、最终出站(final)等。",
+
+    "rules": {
+      "_整体说明": "路由规则列表，按顺序匹配。与DNS规则一样，命中即停止。",
+
+      "0_sniff": {
+        "_整体说明": "规则0：启用流量嗅探。",
+        "action": {
+          "_value": "sniff",
+          "_说明": "嗅探动作。sing-box会尝试从流量中嗅探出域名（从TLS SNI/HTTP Host/DNS查询等）。这是后续域名规则生效的前提——只有嗅探出域名才能按域名分流。"
+        },
+        "_关键": "此规则必须放在最前面，且没有匹配条件（匹配所有流量），确保所有流量都经过嗅探。"
+      },
+
+      "1_hijack_dns": {
+        "_整体说明": "劫持DNS流量到内置DNS服务器。",
+        "type": {
+          "_value": "logical",
+          "_说明": "逻辑规则类型。可组合多个子规则。"
+        },
+        "mode": {
+          "_value": "or",
+          "_说明": "或模式——任一子规则匹配即命中。"
+        },
+        "rules": [
+          {
+            "port": {
+              "_value": 53,
+              "_说明": "目的端口53（DNS标准端口）。"
+            }
+          },
+          {
+            "protocol": {
+              "_value": "dns",
+              "_说明": "协议识别为DNS。sing-box可深度识别流量协议。"
+            }
+          }
+        ],
+        "action": {
+          "_value": "hijack-dns",
+          "_说明": "劫持到内置DNS服务器。将匹配的DNS流量重定向到dns模块处理，而非直接转发到出站。这是DNS防污染的关键步骤。"
+        }
+      },
+
+      "2_bilibili_direct": {
+        "_整体说明": "B站（Bilibili）直连。B站是国内视频网站，直连速度更快。",
+        "domain_suffix": {
+          "_value": [
+            "api.bilibili.com", "www.bilibili.com",
+            "bilivideo.com", "hdslb.com",
+            "bilicdn1.com", "bilicdn.com"
+          ],
+          "_说明": "B站及其CDN域名。api.bilibili.com=API接口，bilicdn.com系列=视频CDN。直连国内CDN速度最优。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        }
+      },
+
+      "3_social_cn_direct": {
+        "_整体说明": "国内社交/短视频平台直连。",
+        "domain_suffix": {
+          "_value": [
+            "xiaohongshu.com", "xhscdn.com",
+            "kuaishou.com", "ixigua.com"
+          ],
+          "_说明": "小红书(xiaohongshu)、快手(kuaishou)、西瓜视频(ixigua)。均为国内平台。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        }
+      },
+
+      "4_fakeip_proxy": {
+        "_整体说明": "FakeIP地址段走代理。这是FakeIP机制的核心路由规则——198.18.0.0/15的FakeIP地址全部转发到代理出站。",
+        "ip_cidr": {
+          "_value": "198.18.0.0/15",
+          "_说明": "FakeIP地址范围。与dns.fakeip.inet4_range一致。所有FakeIP的流量都必须走代理。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理出站。sing-box会根据FakeIP→域名映射恢复真实域名，然后通过代理连接。"
+        }
+      },
+
+      "5_route_options": {
+        "_整体说明": "路由选项配置。",
+        "action": {
+          "_value": "route-options",
+          "_说明": "设置路由选项，而不是选择出站。"
+        },
+        "udp_disable_domain_unmapping": {
+          "_value": true,
+          "_说明": "禁用UDP的域名反向映射。当UDP包来自FakeIP时，默认会尝试反向映射到域名。禁用后直接转发，减少处理开销。",
+          "_疑惑": "禁用域名反向映射会不会影响UDP代理？",
+          "_回答": "部分游戏/语音的UDP连接可能需要域名映射。如果UDP应用异常，可以尝试改为false。但禁用可以减少CPU开销。"
+        },
+        "udp_connect": {
+          "_value": true,
+          "_说明": "启用UDP连接模式。将无连接的UDP流量转换为面向连接的UDP（类似QUIC的做法），更稳定且易于代理。"
+        }
+      },
+
+      "6_reject_ads_dns": {
+        "rule_set": {
+          "_value": ["Ads", "httpDNS", "DNSreject"],
+          "_说明": "广告/跟踪规则集。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "路由层拒绝。"
+        },
+        "method": {
+          "_value": "drop",
+          "_说明": "拒绝方法为drop（静默丢弃）。与DNS层的reject（返回SERVFAIL）不同，路由层的drop直接丢弃数据包，对端无法感知。"
+        }
+      },
+
+      "7_clash_global": {
+        "_整体说明": "Clash模式匹配——全局模式。当通过Clash API切换为Global模式时，所有流量走代理。",
+        "clash_mode": {
+          "_value": "Global",
+          "_说明": "匹配Clash API中的Global模式。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "全部走代理。"
+        }
+      },
+
+      "8_clash_direct": {
+        "_整体说明": "Clash模式匹配——直连模式。",
+        "clash_mode": {
+          "_value": "Direct",
+          "_说明": "匹配Direct模式。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "全部直连。用于临时关闭代理。"
+        }
+      },
+
+      "9_apple_direct": {
+        "rule_set": {
+          "_value": "Apple",
+          "_说明": "Apple规则集（苹果服务域名）。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "苹果服务在国内有CDN节点（iCloud云上贵州等），直连体验好且稳定。"
+        }
+      },
+
+      "10_google_telegram_proxy": {
+        "rule_set": {
+          "_value": ["geosite-youtube", "geosite-google", "telegram"],
+          "_说明": "YouTube/Google/Telegram规则集。必须走代理。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。"
+        }
+      },
+
+      "11_fcm_android_proxy": {
+        "rule_set": {
+          "_value": ["fcm", "Android"],
+          "_说明": "FCM推送和Android系统服务规则集。部分Android服务（如Google Play服务）需要代理。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。"
+        }
+      },
+
+      "12_google_cn_proxy": {
+        "_整体说明": "Google中国域名走代理。google.cn/googleapis.cn虽然在中国可访问，但走代理更稳定。",
+        "domain_suffix": {
+          "_value": ["google.cn", "googleapis.cn"],
+          "_说明": "Google中国站和API中国站。这些域名在国内可直连，但可能被DNS污染或限速。走代理更稳定。",
+          "_疑惑": "为什么google.cn要代理？它不是在国内合法运营吗？",
+          "_回答": "google.cn虽然存在但服务有限（仅翻译等），DNS经常被劫持，代理访问更可靠。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。"
+        }
+      },
+
+      "13_popular_services_proxy": {
+        "domain_suffix": {
+          "_value": [
+            "netflix", "spotify", "github", "steam",
+            "discord", "reddit", "tiktok",
+            "twitter", "facebook", "amazon",
+            "microsoft", "apple", "paypal"
+          ],
+          "_说明": "国际流行服务域名。Netflix/Spotify(流媒体)、GitHub(开发)、Steam(游戏)、Discord(语音)、Reddit/TikTok/Twitter/Facebook(社交)、Amazon(购物)、Microsoft/Apple(科技)、PayPal(支付)。这些在国内被不同程度封锁或限速。注意这里写的是顶级域名后缀（如netflix），会匹配*.netflix.*。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。"
+        }
+      },
+
+      "14_ruleset_proxy": {
+        "rule_set": {
+          "_value": [
+            "telegram", "telegram_ip", "geosite-youtube",
+            "instagram", "Google", "ai",
+            "GlobalMedia", "Proxy", "gfw"
+          ],
+          "_说明": "综合代理规则集。telegram(域名+IP双规则集确保覆盖)、YouTube/Instagram/Google、AI服务(ChatGPT等)、全球流媒体、通用代理列表、GFW列表。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。"
+        }
+      },
+
+      "15_package_direct": {
+        "_整体说明": "特定应用直连。按Android应用包名匹配。",
+        "package_name": {
+          "_value": "com.wwwscn.yuexingbao",
+          "_说明": "月星宝（某国内APP）包名。此应用需要直连才能正常工作。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        }
+      },
+
+      "16_package_regex_proxy": {
+        "_整体说明": "特定应用走代理（正则匹配包名）。",
+        "package_name_regex": {
+          "_value": "^(com\\.google\\.android\\.(youtube|apps\\.(maps|docs|drive))|app\\.revanced\\.android\\.youtube|org\\.telegram\\.messenger(\\..*)?)$",
+          "_说明": "正则匹配以下应用包名并走代理：1) com.google.android.youtube(YouTube官方)；2) com.google.android.apps.maps/docs/drive(Google地图/文档/网盘)；3) app.revanced.android.youtube(YouTube ReVanced修改版)；4) org.telegram.messenger及子包(Telegram)。",
+          "_正则解析": "^开头$结尾，|表示或，\\.转义点号，\\..*表示匹配任意子包名后缀。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。"
+        }
+      },
+
+      "17_protocol_direct": {
+        "_整体说明": "NTP和ICMP协议直连。",
+        "protocol": {
+          "_value": ["ntp", "icmp"],
+          "_说明": "NTP(时间同步)和ICMP(ping)协议。这些协议不需要代理，直连即可。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        }
+      },
+
+      "18_sponsor_direct": {
+        "_整体说明": "特定服务直连。",
+        "domain_suffix": {
+          "_value": [
+            "sponsor.ajay.app", "ifbapp.com",
+            "allawnos.com", "heytapmobi.com",
+            "steamserver.net"
+          ],
+          "_说明": "sponsor.ajay.app=SponsorBlock(跳过YouTube赞助片段)API；ifbapp.com/allawnos.com=某国内应用服务；heytapmobi.com=OPPO/一加相关服务；steamserver.net=Steam服务器。这些直连速度更快。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        }
+      },
+
+      "19_reject_stun_quic": {
+        "_整体说明": "拒绝STUN/QUIC/DTLS协议。这些协议通常用于WebRTC/HTTP3，可能泄露真实IP。",
+        "protocol": {
+          "_value": ["stun", "quic", "dtls"],
+          "_说明": "STUN(NAT穿透/WebRTC)、QUIC(HTTP/3底层协议)、DTLS(UDP TLS/WebRTC加密)。这些协议可能绕过代理直接通信导致IP泄露。",
+          "_注意": "拒绝QUIC会影响HTTP/3网站的访问。浏览器会自动回退到HTTP/2(TCP)，所以影响不大。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝。"
+        }
+      },
+
+      "20_reject_trackers": {
+        "_整体说明": "拒绝特定跟踪域名。",
+        "domain": {
+          "_value": [
+            "beacon.qq.com",
+            "abyss.cyapi.cn",
+            "ad.cyapi.cn",
+            "gather.colorfulclouds.net"
+          ],
+          "_说明": "beacon.qq.com=腾讯数据上报；abyss.cyapi.cn/ad.cyapi.cn=某广告/数据API；gather.colorfulclouds.net=彩云天气数据收集。这些是用户数据收集和广告跟踪域名。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝。"
+        },
+        "method": {
+          "_value": "drop",
+          "_说明": "静默丢弃。"
+        }
+      },
+
+      "21_reject_ipv6_non_china": {
+        "_整体说明": "拒绝非中国IPv6流量。IPv6的GFW拦截能力弱于IPv4，此规则确保IPv6流量不会绕过代理。",
+        "type": {
+          "_value": "logical",
+          "_说明": "逻辑规则。"
+        },
+        "mode": {
+          "_value": "and",
+          "_说明": "与模式——所有子规则必须同时匹配。"
+        },
+        "rules": [
+          {
+            "ip_version": {
+              "_value": 6,
+              "_说明": "匹配IPv6流量。"
+            }
+          },
+          {
+            "default_interface_address": {
+              "_value": "2000::/3",
+              "_说明": "匹配全局单播IPv6地址(2000::/3)。"
+            },
+            "invert": {
+              "_value": true,
+              "_说明": "取反——匹配非全局单播地址的流量（即中国IPv6地址段）。与上面的ip_version=6形成AND：IPv6流量且非中国地址→拒绝。简单说：拒绝海外IPv6流量，防止绕过代理。"
+            }
+          }
+        ],
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝海外IPv6流量。强制走IPv4代理。",
+          "_疑惑": "为什么拒绝所有海外IPv6而不是走代理？",
+          "_回答": "大多数代理节点只支持IPv4，IPv6代理配置复杂。直接拒绝海外IPv6可以迫使应用回退到IPv4，通过代理连接。这是简化配置的折中方案。如果需要IPv6代理，需单独配置IPv6出站节点。"
+        }
+      },
+
+      "22_fcm_proxy": {
+        "_整体说明": "Google FCM推送服务走代理（443和5228端口）。",
+        "type": {
+          "_value": "logical",
+          "_说明": "逻辑规则。"
+        },
+        "mode": {
+          "_value": "and",
+          "_说明": "与模式。"
+        },
+        "rules": [
+          {
+            "domain_suffix": {
+              "_value": [
+                "mtalk.google.com",
+                "alt1-mtalk.google.com", "alt2-mtalk.google.com",
+                "alt3-mtalk.google.com", "alt4-mtalk.google.com",
+                "alt5-mtalk.google.com", "alt6-mtalk.google.com",
+                "alt7-mtalk.google.com", "alt8-mtalk.google.com"
+              ],
+              "_说明": "Google FCM推送服务器域名（主+8个备用）。"
+            }
+          },
+          {
+            "port": {
+              "_value": [443, 5228],
+              "_说明": "FCM使用的端口：443(HTTPS)和5228(FCM专用端口)。"
+            }
+          }
+        ],
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。确保Android消息推送正常。"
+        }
+      },
+
+      "23_ruleset_proxy2": {
+        "rule_set": {
+          "_value": ["telegramip", "geosite-google", "proxy", "games", "ai"],
+          "_说明": "代理规则集（第二轮匹配）。注意telegramip是IP规则集，用于匹配Telegram的IP地址。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。"
+        }
+      },
+
+      "24_cn_direct": {
+        "_整体说明": "国内流量直连（综合规则集）。",
+        "rule_set": {
+          "_value": [
+            "private", "cn", "cnip",
+            "microsoft-cn", "apple-cn", "google-cn",
+            "games-cn", "networktest"
+          ],
+          "_说明": "国内相关规则集：private(局域网)、cn(国内域名)、cnip(国内IP)、microsoft-cn/apple-cn/google-cn(国际公司在华服务)、games-cn(国内游戏)、networktest(网络检测)。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        }
+      },
+
+      "25_cn_services_direct": {
+        "_整体说明": "国内服务和厂商域名直连。",
+        "domain_suffix": {
+          "_value": [
+            "alipay.com", "alicdn.com", "aliyuncs.com",
+            "qcloud.com", "cloud.tencent.com",
+            "mi.com", "xiaomi.com",
+            "huawei.com", "vivo.com.cn", "oppo.com",
+            "coolapk.com", "wps.cn", "biliapi.com"
+          ],
+          "_说明": "支付宝/阿里CDN/阿里云、腾讯云、小米/华为/vivo/OPPO(手机厂商)、酷安(应用市场)、WPS(办公)、B站API。全部国内服务，直连。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        }
+      },
+
+      "26_global_media_proxy": {
+        "rule_set": {
+          "_value": [
+            "geosite-google", "geosite-youtube",
+            "instagram", "telegram",
+            "GlobalMedia", "gfw", "Proxy"
+          ],
+          "_说明": "全球媒体和代理规则集（第三轮）。注意：多个规则匹配相同规则集不是bug，而是为了在规则链中不同位置再次确认——部分流量可能在前面被其他规则拦截，这里是兜底匹配。"
+        },
+        "outbound": {
+          "_value": "PROXY",
+          "_说明": "走代理。"
+        }
+      },
+
+      "27_reject_private_ip": {
+        "_整体说明": "拒绝私有/保留IP地址段的直接访问。防止内网IP流量泄露。",
+        "ip_cidr": {
+          "_value": [
+            "0.0.0.0/8", "10.0.0.0/8",
+            "127.0.0.0/8", "169.254.0.0/16",
+            "172.16.0.0/12", "192.168.0.0/16",
+            "224.0.0.0/4", "240.0.0.0/4"
+          ],
+          "_说明": "RFC 6890规定的特殊用途IP地址段：0.0.0.0/8(本网络)、10.0.0.0/8(A类私有)、127.0.0.0/8(回环)、169.254.0.0/16(链路本地/APIPA)、172.16.0.0/12(B类私有)、192.168.0.0/16(C类私有)、224.0.0.0/4(组播)、240.0.0.0/4(保留/未来使用)。这些地址不应出现在代理流量中，出现则异常。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝。防止内网IP通过代理出去（安全风险）。",
+          "_疑惑": "之前不是让private域名直连吗？这里为什么又拒绝私有IP？",
+          "_回答": "之前是DNS层面的private域名→直连。这里是IP层面的私有IP→拒绝。两者不矛盾：DNS层面允许解析私有域名（获得内网IP），但到IP层时，如果目标IP是私有地址且不在局域网内（从代理入口进来），拒绝是安全措施。正常的局域网访问（通过local DNS→直连）不会经过这里。"
+        }
+      },
+
+      "28_apps_direct": {
+        "_整体说明": "特定知名应用直连。",
+        "package_name": {
+          "_value": [
+            "com.tencent.mm",
+            "com.eg.android.AlipayGphone",
+            "com.netease.cloudmusic"
+          ],
+          "_说明": "微信(com.tencent.mm)、支付宝(com.eg.android.AlipayGphone)、网易云音乐(com.netease.cloudmusic)。国内应用，直连更快。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。"
+        }
+      },
+
+      "29_reject_ads_rule": {
+        "rule_set": {
+          "_value": ["geosite_adguard", "geosite-category-ads-all"],
+          "_说明": "广告规则集路由层拒绝。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝。"
+        }
+      },
+
+      "30_reject_stun_services": {
+        "_整体说明": "拒绝STUN/TURN/HTTPDNS服务。防止WebRTC泄露真实IP和HTTPDNS绕过内置DNS。",
+        "type": {
+          "_value": "logical",
+          "_说明": "逻辑规则。"
+        },
+        "mode": {
+          "_value": "or",
+          "_说明": "或模式——任一匹配即命中。"
+        },
+        "rules": [
+          {
+            "network": {
+              "_value": "udp",
+              "_说明": "UDP协议。"
+            },
+            "port": {
+              "_value": [3478, 5349, 5350, 19302, 10000],
+              "_说明": "STUN/TURN常用端口：3478(STUN标准端口)、5349(STUN over TLS)、5350、19302(Google STUN)、10000(TURN)。"
+            }
+          },
+          {
+            "domain_regex": {
+              "_value": "^stun\\..+",
+              "_说明": "正则：以stun.开头的域名（如stun.l.google.com）。"
+            }
+          },
+          {
+            "domain_keyword": {
+              "_value": ["stun", "turn", "httpdns"],
+              "_说明": "域名包含stun/turn/httpdns关键字。HTTPDNS是各厂商的私有加密DNS服务（如阿里HTTPDNS），会绕过sing-box的DNS系统。"
+            }
+          },
+          {
+            "protocol": {
+              "_value": "stun",
+              "_说明": "协议识别为STUN。"
+            }
+          }
+        ],
+        "action": {
+          "_value": "reject",
+          "_说明": "全部拒绝。防止IP泄露。"
+        },
+        "_疑惑": "拒绝STUN会不会影响WebRTC通话（如微信视频、Zoom等）？",
+        "_回答": "会影响！WebRTC依赖STUN/TURN进行NAT穿透。如果使用WebRTC通话（如Telegram/微信视频通话、Zoom网页版），需要删除此规则或添加例外。此规则的取舍：牺牲WebRTC功能换取隐私安全。"
+      },
+
+      "31_anti_fraud": {
+        "rule_set": {
+          "_value": "anti_fraud",
+          "_说明": "反欺诈规则集。匹配已知的诈骗/钓鱼/恶意网站。"
+        },
+        "action": {
+          "_value": "reject",
+          "_说明": "拒绝访问。保护安全。"
+        }
+      },
+
+      "32_private_ip_direct": {
+        "_整体说明": "私有IP直连。",
+        "ip_is_private": {
+          "_value": true,
+          "_说明": "匹配所有私有IP地址（10.x/172.16-31.x/192.168.x等）。"
+        },
+        "outbound": {
+          "_value": "DIRECT",
+          "_说明": "直连。这个规则在27号规则（拒绝私有IP）之后，但为什么还会有私有IP流量到达这里？——因为27号规则用的是ip_cidr匹配，而这个用的是ip_is_private。如果27号规则没有覆盖到某些私有IP，32号规则作为兜底确保直连。",
+          "_疑惑": "规则27和规则32是否矛盾？",
+          "_回答": "不完全矛盾，但确实有重叠。规则27明确拒绝所有已知的特殊地址段；规则32作为兜底（匹配未被27覆盖的私有IP情况。实际上规则27在前会先匹配，大部分私有IP在27就被拒绝了，到不了32。保留规则32可能是为了安全性——如果删除了规则27，32可以保证私有IP直连而非走代理。"
+        }
+      },
+
+      "33_resolve": {
+        "_整体说明": "最终规则：强制DNS解析。",
+        "action": {
+          "_value": "resolve",
+          "_说明": "对剩余未匹配流量执行DNS解析（如果目标地址是域名的话），解析后再根据IP规则路由。这是路由链的最后一步。"
+        }
+      }
+    },
+
+    "rule_set": {
+      "_整体说明": "远程规则集列表。这些规则集从远程URL定期下载更新，包含大量的域名/IP分类。sing-box使用.srs格式（sing-box rule set）的二进制规则文件。",
+
+      "rs_geosite_category_ads_all": {
+        "type": {
+          "_value": "remote",
+          "_说明": "远程类型——从URL下载规则集。"
+        },
+        "tag": {
+          "_value": "geosite-category-ads-all",
+          "_说明": "规则集标签名，供DNS和路由规则引用。"
+        },
+        "url": {
+          "_value": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
+          "_说明": "规则集下载URL。jsDelivr CDN加速的GitHub仓库。SagerNet/sing-geosite 是 sing-box 社区维护的 geosite 规则集。category-ads-all=所有广告分类。"
+        },
+        "http_client": {
+          "_value": "default",
+          "_说明": "使用default HTTP客户端（即前面定义的走PROXY的客户端）。"
+        },
+        "update_interval": {
+          "_value": "48h0m0s",
+          "_说明": "更新间隔48小时。每2天检查一次规则集更新。"
+        }
+      },
+
+      "rs_geosite_adguard": {
+        "type": {
+          "_value": "remote",
+          "_说明": "远程规则集。"
+        },
+        "tag": {
+          "_value": "geosite_adguard",
+          "_说明": "AdGuard广告过滤规则集（社区维护）。"
+        },
+        "url": {
+          "_value": "https://cdn.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblocksingbox.srs",
+          "_说明": "来自217heidai/adblockfilters仓库的广告过滤规则，专为sing-box格式转换。"
+        },
+        "http_client": {
+          "_value": "default",
+          "_说明": "默认HTTP客户端。"
+        },
+        "update_interval": {
+          "_value": "48h0m0s",
+          "_说明": "48小时更新。"
+        }
+      },
+
+      "rs_geosite_google": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "geosite-google", "_说明": "Google服务规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-google.srs", "_说明": "Google所有服务域名合集（搜索、分析、广告、API等）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_geosite_youtube": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "geosite-youtube", "_说明": "YouTube规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-youtube.srs", "_说明": "YouTube及其CDN域名（googlevideo.com, ytimg.com等）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_proxy": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "proxy", "_说明": "代理规则集（通用被封锁域名）。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/proxy.srs", "_说明": "DustinWin维护的代理域名规则集，收录国内无法直接访问的域名。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_games": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "games", "_说明": "游戏规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/games.srs", "_说明": "游戏平台和服务域名（Steam/Epic/Origin/战网等）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_ai": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "ai", "_说明": "AI服务规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/ai.srs", "_说明": "ChatGPT/Claude/Gemini/Copilot等AI服务域名。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_private": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "private", "_说明": "私有/局域网域名规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/private.srs", "_说明": "局域网、内网、私有域名集合。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_anti_fraud": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "anti_fraud", "_说明": "反欺诈/反诈骗规则集。"},
+        "url": {"_value": "https://raw.githubusercontent.com/hwsaya/nothing/refs/heads/main/rules/FuckFZ.json", "_说明": "hwsaya维护的反欺诈规则集（FuckFZ=干翻诈骗）。使用raw.githubusercontent.com直链而非jsDelivr CDN。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_cn": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "cn", "_说明": "中国域名规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/cn.srs", "_说明": "国内域名合集（.cn及中国公司在海外的域名）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_microsoft_cn": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "microsoft-cn", "_说明": "微软中国服务规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/microsoft-cn.srs", "_说明": "微软在中国的服务域名（Office 365中国版、Azure中国等），这些走直连更优。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_apple_cn": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "apple-cn", "_说明": "苹果中国服务规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/apple-cn.srs", "_说明": "苹果在中国的服务域名（iCloud云上贵州、Apple Music中国等）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_google_cn": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "google-cn", "_说明": "Google中国服务规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/google-cn.srs", "_说明": "Google在中国的可访问服务（如google.cn翻译、Google广告国内版等）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_games_cn": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "games-cn", "_说明": "国内游戏规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/games-cn.srs", "_说明": "国内游戏公司域名（腾讯游戏、网易游戏等），走直连。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_networktest": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "networktest", "_说明": "网络测试规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/networktest.srs", "_说明": "网络连通性检测域名（如captive.apple.com、connectivitycheck.gstatic.com等），直连确保检测准确。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_telegramip": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "telegramip", "_说明": "Telegram IP规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/telegramip.srs", "_说明": "Telegram服务器IP地址段。IP规则而非域名规则——因为Telegram在某些情况下直接用IP连接。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_telegram_ip": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "telegram_ip", "_说明": "Telegram IP规则集（MetaCubeX源）。"},
+        "url": {"_value": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geoip/telegram.srs", "_说明": "来自MetaCubeX项目的Telegram IP规则集。与上面的telegramip来自不同维护者，互相补充覆盖。为什么用两个Telegram IP规则集？——不同维护者更新频率和覆盖范围不同，双重规则集确保Telegram IP全部覆盖。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_Proxy": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "Proxy", "_说明": "非中国地理位置域名规则集（注意大写P，与proxy规则集不同）。"},
+        "url": {"_value": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs", "_说明": "geosite中归类为'非中国'的所有域名（!cn表示not cn）。即所有非中国地区的域名。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_gfw": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "gfw", "_说明": "GFW规则集（已知被防火墙封锁的域名）。"},
+        "url": {"_value": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/gfw.srs", "_说明": "MetaCubeX维护的GFW拦截域名列表。收录已知被中国防火墙封锁的域名。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_cnip": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "cnip", "_说明": "中国IP地址段规则集。"},
+        "url": {"_value": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/cnip.srs", "_说明": "中国IP地址段（由APNIC分配给中国的IP段）。用于IP层分流——IP属于中国的直连。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_Filter": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "Filter", "_说明": "FakeIP过滤规则集。"},
+        "url": {"_value": "https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/fakeip-filter.srs", "_说明": "不应使用FakeIP的域名列表（如国内域名、需要真实IP的特殊域名）。这些域名需要真实DNS解析（不能返回FakeIP）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_DNSreject": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "DNSreject", "_说明": "DNS拒绝规则集（AdGuard SDNS Filter）。"},
+        "url": {"_value": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/main/rule/AdGuardSDNSFilter/AdGuardSDNSFilter.srs", "_说明": "AdGuard SDNS过滤规则——应在DNS层面拒绝的广告/跟踪域名。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_httpDNS": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "httpDNS", "_说明": "HTTPDNS拒绝规则集。"},
+        "url": {"_value": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/main/rule/BlockHttpDNS/BlockHttpDNS.srs", "_说明": "需要阻止的HTTPDNS服务域名（防止应用绕过sing-box的DNS系统）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_Ads": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "Ads", "_说明": "广告规则集。"},
+        "url": {"_value": "https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/ads.srs", "_说明": "通用广告域名规则集。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_Apple": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "Apple", "_说明": "Apple规则集。"},
+        "url": {"_value": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-apple.srs", "_说明": "Apple所有服务域名（iCloud/App Store/Apple Music/iMessage等）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_fcm": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "fcm", "_说明": "Google FCM推送规则集。"},
+        "url": {"_value": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/main/rule/GoogleFCM/GoogleFCM.srs", "_说明": "Google Firebase Cloud Messaging服务域名。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_Android": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "Android", "_说明": "Android系统服务规则集。"},
+        "url": {"_value": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/main/rule/Android/Android.srs", "_说明": "Android系统相关域名（更新检查、时间同步、连接检测等）。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_telegram": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "telegram", "_说明": "Telegram域名规则集。"},
+        "url": {"_value": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs", "_说明": "Telegram所有服务域名。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_instagram": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "instagram", "_说明": "Instagram规则集。"},
+        "url": {"_value": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-instagram.srs", "_说明": "Instagram及CDN域名。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_Google": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "Google", "_说明": "Google规则集（senshinya源）。"},
+        "url": {"_value": "https://raw.githubusercontent.com/senshinya/singbox_ruleset/main/rule/Google/Google.srs", "_说明": "Google服务规则集（senshinya维护版本）。注意与前面的geosite-google来自不同维护者，规则覆盖可能略有不同。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      },
+
+      "rs_GlobalMedia": {
+        "type": {"_value": "remote", "_说明": "远程类型。"},
+        "tag": {"_value": "GlobalMedia", "_说明": "全球媒体规则集。"},
+        "url": {"_value": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/category-entertainment.srs", "_说明": "全球娱乐/流媒体域名（Netflix/Disney+/HBO/Hulu/Spotify等）。来自MetaCubeX项目。"},
+        "http_client": {"_value": "default", "_说明": "默认客户端。"},
+        "update_interval": {"_value": "48h0m0s", "_说明": "48小时。"}
+      }
+    },
+
+    "final": {
+      "_value": "Final",
+      "_说明": "路由最终出站。当没有任何规则匹配时，流量走向Final出站（即前面定义的Final选择器，默认=PROXY）。安全策略：未知流量走代理。"
+    },
+    "auto_detect_interface": {
+      "_value": true,
+      "_说明": "自动检测网络接口。sing-box会自动检测当前活跃的网络接口（WiFi/移动数据/以太网等），在接口切换时自动更新路由。移动设备必开。"
+    },
+    "default_domain_resolver": {
+      "_value": "dns-udp",
+      "_说明": "路由默认域名解析器。当路由需要解析域名（如domain_suffix匹配需要DNS查询）时，使用dns-udp服务器。选择UDP DNS因为它是配置中最基础可靠的DNS。"
+    }
+  },
+
+  "============================================": "第8部分：experimental - 实验性功能",
+  "============================================_说明": "sing-box的实验性功能模块，包括缓存、Clash API兼容、调试等。",
+
+  "experimental": {
+    "_整体说明": "实验性功能配置。这些功能可能在未来版本中变动或移除。",
+
+    "cache_file": {
+      "_整体说明": "缓存文件配置。将DNS缓存、FakeIP映射等持久化到磁盘，重启后无需重新构建。",
+      "enabled": {
+        "_value": true,
+        "_说明": "启用缓存文件。强烈推荐开启——重启sing-box后保留FakeIP映射和DNS缓存，避免服务中断。"
+      },
+      "path": {
+        "_value": "cache.db",
+        "_说明": "缓存文件路径。存储在sing-box工作目录下的cache.db文件（SQLite格式）。"
+      },
+      "cache_id": {
+        "_value": "my-singbox-cache-v2",
+        "_说明": "⚠️已修改：缓存ID。用于区分不同配置的缓存。修改配置后如果缓存不兼容，改此ID可以强制重建缓存。",
+        "_原值": "cinchov"
+      },
+      "store_fakeip": {
+        "_value": true,
+        "_说明": "持久化存储FakeIP映射。重启后FakeIP→域名映射仍然有效，不会导致已建立的连接断开。"
+      },
+      "store_dns": {
+        "_value": true,
+        "_说明": "持久化存储DNS缓存。重启后保留DNS解析结果，减少冷启动时的DNS查询。"
+      }
+    },
+
+    "clash_api": {
+      "_整体说明": "Clash API兼容层。提供与Clash兼容的REST API，可使用Clash生态的Web管理面板（如yacd、metacubexd等）。",
+      "external_controller": {
+        "_value": "127.0.0.1:9095",
+        "_说明": "⚠️已修改：Clash API监听地址和端口。Web管理面板通过此地址连接。仅监听127.0.0.1确保只有本机能访问API。",
+        "_原值": "127.0.0.1:9090",
+        "_访问": "浏览器打开 http://127.0.0.1:9095/ui 即可进入管理面板。"
+      },
+      "external_ui": {
+        "_value": "ui",
+        "_说明": "Web UI静态文件目录。sing-box会在同目录下查找ui文件夹中的HTML/JS/CSS文件。需要手动下载yacd或metacubexd的发布包解压到此目录。"
+      },
+      "default_mode": {
+        "_value": "rule",
+        "_说明": "默认Clash模式为rule（规则模式）。可选：rule(规则分流)、global(全局代理)、direct(全局直连)。"
+      }
+    },
+
+    "debug": {
+      "_整体说明": "调试和性能调优配置。",
+      "gc_percent": {
+        "_value": 100,
+        "_说明": "Go GC（垃圾回收）触发百分比。100=当堆内存增长100%时触发GC。默认值通常为100。调低可减少内存占用但增加CPU，调高则反之。对于代理工具，默认值即可。",
+        "_单位": "百分比"
+      },
+      "memory_limit": {
+        "_value": "400MB",
+        "_说明": "内存软限制400MB。sing-box会尽量将内存使用控制在此限制内。注意这不是硬限制——在极端情况下可能超出。对于常规使用场景（非服务器级大流量），400MB足够。",
+        "_调整": "如果经常OOM(内存溢出)，可以降低此值。如果有大量并发连接（>1000），可能需要提高。"
+      }
+    }
+  },
+
+  "============================================": "附录：总结与修改清单",
+  "============================================_说明": "以下是所有修改过的敏感信息汇总，方便对照原始值。",
+
+  "修改清单": {
+    "UUID": {
+      "原值": "03c34f42-1a56-42eb-8204-a5f259adf57b",
+      "新值": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "位置": "所有5个VLESS节点的uuid字段",
+      "操作": "请用 uuidgen 命令或在线UUID生成器生成新的随机UUID"
+    },
+    "REALITY公钥": {
+      "原值": "-eNfrsUN351vvRk8F-Auuhye5azNfwdvPD5YuOF3-ig",
+      "新值": "AbCdEfGhIjKlMnOpQrStUvWxYz1234567890ABC",
+      "位置": "pkpk01节点的tls.reality.public_key",
+      "操作": "请用 sing-box generate reality-keypair 生成新密钥对"
+    },
+    "REALITY伪装域名(SNI)": {
+      "原值": "addons.mozilla.org",
+      "新值": "www.microsoft.com",
+      "位置": "pkpk01节点的tls.server_name",
+      "操作": "选择一个真实存在的、支持TLS 1.3的国外大站域名"
+    },
+    "节点域名1": {
+      "原值": "pk5.372164885.xyz",
+      "新值": "node1.example-proxy.net",
+      "位置": "pkpk01.server"
+    },
+    "节点域名2": {
+      "原值": "pk1.372164885.xyz",
+      "新值": "node2.example-proxy.net",
+      "位置": "pkpk02.server / pkpk02.tls.server_name / pkpk02-05.transport.headers.Host / pkpk03-05.tls.server_name"
+    },
+    "节点域名3": {
+      "原值": "www.visa.com",
+      "新值": "cdn-edge.example-cdn.net",
+      "位置": "pkpk03.server"
+    },
+    "节点域名4": {
+      "原值": "cf.090227.xyz",
+      "新值": "node4.example-proxy.net",
+      "位置": "pkpk04.server"
+    },
+    "节点域名5": {
+      "原值": "372164885.xyz",
+      "新值": "node5.example-proxy.net",
+      "位置": "pkpk05.server"
+    },
+    "节点端口1": {
+      "原值": 7173,
+      "新值": 8443,
+      "位置": "pkpk01.server_port"
+    },
+    "WebSocket路径": {
+      "原值": "/sba-vl",
+      "新值": "/ws-proxy-path",
+      "位置": "pkpk02-05的transport.path"
+    },
+    "Host头": {
+      "原值": "pk1.372164885.xyz",
+      "新值": "node2.example-proxy.net",
+      "位置": "pkpk02-05的transport.headers.Host"
+    },
+    "个人DNS域名": {
+      "原值": "pk1.372164885.xyz",
+      "新值": "mynode.example.com",
+      "位置": "dns.rules中domain_suffix为个人域名的规则"
+    },
+    "TUN地址": {
+      "原值": "10.8.0.1/24",
+      "新值": "172.19.0.1/24",
+      "位置": "inbounds[0].address"
+    },
+    "DNS劫持地址": {
+      "原值": "10.8.0.2",
+      "新值": "172.19.0.2",
+      "位置": "inbounds[0].dns_address"
+    },
+    "混合代理端口": {
+      "原值": 7890,
+      "新值": 2080,
+      "位置": "inbounds[1].listen_port"
+    },
+    "HTTP代理端口": {
+      "原值": 7891,
+      "新值": 2081,
+      "位置": "inbounds[2].listen_port"
+    },
+    "SOCKS代理端口": {
+      "原值": 7892,
+      "新值": 2082,
+      "位置": "inbounds[3].listen_port"
+    },
+    "Redirect端口": {
+      "原值": 7893,
+      "新值": 2083,
+      "位置": "inbounds[4].listen_port"
+    },
+    "Clash API端口": {
+      "原值": "127.0.0.1:9090",
+      "新值": "127.0.0.1:9095",
+      "位置": "experimental.clash_api.external_controller"
+    },
+    "缓存ID": {
+      "原值": "cinchov",
+      "新值": "my-singbox-cache-v2",
+      "位置": "experimental.cache_file.cache_id"
+    },
+    "ECS客户端子网": {
+      "原值": "114.114.114.114/32",
+      "新值": "8.8.8.8/32",
+      "位置": "dns.client_subnet"
+    },
+    "UDP DNS服务器": {
+      "原值": "114.114.114.114",
+      "新值": "114.114.114.114",
+      "位置": "dns.servers中dns-udp的server",
+      "说明": "此值未修改，114.114.114.114是公开的国内DNS，可以保留。如需更换可用223.5.5.5(阿里)或119.29.29.29(腾讯)。"
+    }
+  },
+
+  "============================================": "常见问题与疑惑解答",
+  "============================================_说明": "汇总配置中的关键疑惑点和解答。",
+
+  "FAQ": {
+    "Q1_为什么多个规则集重复引用": {
+      "问题": "配置中geosite-google、Proxy、gfw等规则集在DNS rules和route rules中多次出现，是否冗余？",
+      "回答": "不是冗余。DNS规则和路由规则是两个独立的处理阶段。DNS规则决定用哪个DNS服务器解析域名；路由规则决定解析后的流量走哪个出站。同一个域名需要在两个阶段分别匹配。另外，规则链中同一规则集出现多次（如规则14和规则26都匹配Proxy/gfw等）是为了兜底——前面的规则可能被更精确的规则拦截，后面的作为二次确认。"
+    },
+    "Q2_FakeIP和真实IP如何协同": {
+      "问题": "FakeIP返回假IP后，如何建立真实连接？",
+      "回答": "sing-box维护一个FakeIP→域名映射表。流程：1) DNS查询返回FakeIP(如198.18.0.5)；2) TCP/UDP连接目标为198.18.0.5；3) 路由规则198.18.0.0/15→PROXY；4) sing-box查表找到真实域名(如google.com)；5) 通过代理与google.com建立连接。应用层看到的是假IP，实际连接的是真实域名。"
+    },
+    "Q3_REALITY vs 普通TLS区别": {
+      "问题": "pkpk01使用REALITY，pkpk02-05使用普通TLS+WS，有什么区别？",
+      "回答": "REALITY不需要自己的域名和SSL证书，利用目标网站(如microsoft.com)的合法证书进行伪装，更隐蔽且零成本。TLS+WS需要自有域名和证书（通常用Let's Encrypt），但可以通过CDN(Cloudflare等)隐藏源站。REALITY适合追求极致隐蔽的场景，WS+TLS适合需要CDN加速的场景。两者互补——一个被封还可以用另一个。"
+    },
+    "Q4_为什么拒绝STUN会影响WebRTC": {
+      "问题": "配置中拒绝了STUN协议，会影响哪些功能？",
+      "回答": "影响所有基于WebRTC的应用：Telegram/微信视频通话、Google Meet/Zoom网页版、Discord语音、部分直播平台的WebRTC推流等。如果这些功能对你很重要，建议删除STUN拒绝规则（路由规则19和30）。但保留它们可以防止WebRTC泄露真实IP——WebRTC可能绕过代理直接建立P2P连接。这是隐私与功能的权衡。"
+    },
+    "Q5_缓存文件cache.db的作用": {
+      "问题": "cache.db存储了什么？删除后有什么影响？",
+      "回答": "存储了：1) FakeIP映射表；2) DNS解析缓存；3) 其他运行状态。删除cache.db后，所有FakeIP映射丢失——如果sing-box正在运行且有活跃连接，这些连接可能断开。建议在停止sing-box后再删除。正常情况下无需手动管理，sing-box会自动维护。"
+    },
+    "Q6_Brutal速率设置1000Mbps是否合理": {
+      "问题": "每个节点的Brutal up/down都设为1000Mbps，是否需要调整？",
+      "回答": "1000Mbps是理论值上限。Brutal会根据实际网络状况动态调整速率，不会真的占满千兆带宽（除非你的宽带和代理服务器都支持千兆）。如果你的宽带只有100M，可以改为100；如果代理服务器带宽有限，也相应调低。设置过高的值不会造成问题（Brutal会自动收敛），但设置过低会限制速度。"
+    }
+  },
+
+  "============================================": "使用前必读",
+  "============================================_说明": "此文件是原始配置的完整注释版 + 敏感信息修改版，不能直接用于sing-box运行。",
+
+  "重要提示": {
+    "不能直接使用": "此JSON文件包含了大量非标准JSON的注释结构（_说明、_疑惑等），不能直接被sing-box解析。请将此作为参考文档，对照修改原始配置文件。",
+    "敏感信息已修改": "所有密码、密钥、UUID、域名、端口均已修改为示例值。请务必将它们替换为你自己的真实值！",
+    "如何使用": "1) 阅读注释理解每个配置项的含义；2) 参考'修改清单'部分找到需要修改的值；3) 在原始JSON配置文件中逐一替换；4) 用 sing-box check 命令验证配置正确性。",
+    "免责声明": "本文件仅供学习和参考使用。使用代理工具请遵守当地法律法规。",
+    "生成时间": "2026-05-19",
+    "适用版本": "sing-box v1.14.0-alpha.24 及以上"
+  }
+}
