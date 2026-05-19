@@ -314,7 +314,7 @@
         "action": "reject"
       }
     ],
-    "final": "quad9-doh",
+    "final": "cf-dot",
     "reverse_mapping": true,
     "strategy": "prefer_ipv4",
     "timeout": "3s",
