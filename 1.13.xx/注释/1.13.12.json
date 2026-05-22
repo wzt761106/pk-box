@@ -1,271 +1,547 @@
 // ============================================================================
-// sing-box 1.13.11 → 1.13.12 配置变更说明
-// 平台: Android / sing-box 1.13.12
-// 标注: [+]新增 [-]删除 [*]修改 [!]敏感信息已屏蔽
+// 文件名: 配置逐行解析.json
+// 用途:   sing-box 1.13.12 完整配置的逐行注释与问答
+// 平台:   Android / sing-box 1.13.12
+// 格式:   以 1.13.11 为模板, [+]新增 [-]删除 [*]修改 [!]敏感屏蔽
 // ============================================================================
 
 {
-  // ---------------------------------------------------------------------------
-  // 日志 [*] trace → info (减少日志量,提升性能)
-  // ---------------------------------------------------------------------------
-  "log": {
-    "level": "info",          // [*] 原 trace
-    "timestamp": true
-  },
 
-  // ---------------------------------------------------------------------------
-  // NTP (无变更)
-  // ---------------------------------------------------------------------------
-  "ntp": {
-    "enabled": true,
-    "server": "ntp.aliyun.com",
-    "server_port": 123,
-    "interval": "30m"
+  // =========================================================================
+  // 日志模块
+  // 疑问: trace和info有什么区别?
+  // 回答: trace记录每一次连接的每一条数据包, 一天能产生几百MB日志
+  //       info只记录连接建立/关闭/DNS查询结果, 足够排障用
+  // =========================================================================
+  "log": {
+    "level": "info",          // [*] 原 trace → info
+                              // trace在手机上写入量和CPU开销都很大
+                              // 除了深度排障, info完全够用
+    "timestamp": true         // 每条日志带时间戳, 方便排查问题时间线
   },
 
   // =========================================================================
-  // DNS 模块 (核心变更区)
+  // NTP 时间同步
+  // 疑问: 代理工具为什么要时间同步?
+  // 回答: TLS证书校验依赖系统时间。手机重启后时间可能不准,
+  //       证书会因"未到有效期"或"已过期"被拒 → 节点全断
+  //       NTP每30分钟对一次, 确保TLS握手不出错
+  // =========================================================================
+  "ntp": {
+    "enabled": true,          // 开启NTP
+    "server": "ntp.aliyun.com",
+                              // [!] 阿里云NTP, 国内延迟最低(~5ms)
+                              // 为什么不用国际NTP? 国内访问 pool.ntp.org
+                              // 经常超时, 选阿里更稳
+    "server_port": 123,       // NTP标准端口
+    "interval": "30m"         // 每30分钟同步一次
+                              // 为什么不是更短? 频繁NTP没必要, 手机时钟
+                              // 漂移很小(通常<1秒/天), 30分钟足够
+  },
+
+  // =========================================================================
+  // DNS 模块
+  // 核心概念: sing-box的DNS是"透明代理DNS"——拦截所有App的DNS查询,
+  //          根据域名分流到不同上游, 实现防劫持+去广告+FakeIP。
   // =========================================================================
   "dns": {
     "servers": [
-      // [-] 删除: { "tag":"alidns_udp","type":"udp","server":"223.5.5.5" }
-      //     原因: 国内DNS UDP明文,运营商可劫持
-      // [+] 新增: 阿里DoH(加密) + 腾讯DoH/UDP + Cloudflare备用, 共4个
-      // [*] 旧版只有4个服务器, 新版8个
-
+      // ---------------------------------------------------------------------
+      // 本地DNS: 走手机系统的DNS设置
+      // 疑问: 既然有阿里/腾讯了, 为什么还要local?
+      // 回答: local处理 .local 域名的mDNS组播、局域网主机名解析,
+      //       这些是阿里/腾讯DNS不知道的, 必须走系统DNS
+      // ---------------------------------------------------------------------
       {
-        "tag": "local",
-        "type": "local"
+        "tag": "local",       // 标签名, 被DNS规则引用
+        "type": "local"       // 系统DNS(Android用getaddrinfo)
+                              // 疑问: 为什么不加 detour?
+                              // 回答: local是系统调用, 不走sing-box出站,
+                              //       detour对它无效
       },
 
-      // [+] 阿里DoH (WiFi主力, 加密)
+      // ---------------------------------------------------------------------
+      // 阿里DoH: DNS over HTTPS, 加密防运营商劫持
+      // 疑问: 为什么type:"https"的server只写主机名?
+      // 回答: sing-box自动补全 https://主机名/dns-query
+      //       如果自己写完整URL, sing-box会再次拼接 → 双重编码报错
+      // 疑问: domain_resolver干什么的?
+      // 回答: 这个DNS服务器自己是个域名(dns.alidns.com)
+      //       要连接它, 得先解析它的IP → 这就是鸡生蛋蛋生鸡
+      //       domain_resolver指定用 alidns_quic(223.5.5.5 UDP)
+      //       来解析 dns.alidns.com, 因为223.5.5.5是IP直连不需要解析
+      // ---------------------------------------------------------------------
       {
         "tag": "alidns_doh",
-        "type": "https",
-        "server": "dns.alidns.com",                   // [!] 主机名(不能带https://)
-        "domain_resolver": "alidns_quic"              // [+] 必加: 用IP型DNS解析自身
+        "type": "https",      // DNS over HTTPS (RFC 8484)
+                              // 在HTTPS隧道中传输DNS, 运营商看不到查询内容
+        "server": "dns.alidns.com",
+                              // [!] 注意: 没有 https:// 前缀!
+                              // 也没有 /dns-query 路径! sing-box自动加
+        "domain_resolver": "alidns_quic"
+                              // 用IP型DNS解析自身, 打破循环依赖
+                              // 疑问: 为什么不用local?
+                              // 回答: local在Android上可能走系统DNS
+                              //       而系统DNS可能被运营商劫持
+                              //       用223.5.5.5 UDP更干净
       },
 
-      // [+] 阿里UDP (域名型DNS的解析器, IP直连无循环依赖)
+      // ---------------------------------------------------------------------
+      // 阿里UDP: 经典DNS, IP直连, 作为domain_resolver链条的根
+      // 疑问: 为什么type不叫"udp_quic"?
+      // 回答: 本来想用QUIC(DoQ)但223.5.5.5不支持DoQ
+      //       改回UDP后正常工作。国内DNS服务器大多不支持DoQ
+      // ---------------------------------------------------------------------
       {
         "tag": "alidns_quic",
-        "type": "udp",
-        "server": "223.5.5.5"                         // [!]
+        "type": "udp",        // 标准UDP DNS(端口53)
+                              // 疑问: 为什么不加密?
+                              // 回答: 它只用来解析其他DNS服务器的域名
+                              //       (dns.alidns.com → IP)
+                              //       解析完就交给DoH加密传输了
+        "server": "223.5.5.5"
+                              // [!] 阿里公共DNS, 移动宽带最优
+                              // IP直连, 不需要 domain_resolver
       },
 
-      // [+] 腾讯DoH (联通/电信宽带优化)
+      // ---------------------------------------------------------------------
+      // 腾讯DoH: 电信/联通优化
+      // 疑问: 已经有了阿里DoH, 为什么还要腾讯?
+      // 回答: 三网优化。阿里在移动宽带延迟低,
+      //       腾讯(DNSPod)在电信联通基站侧有专线对等
+      //       但当前config里它没有被任何规则引用, 作为预留
+      // ---------------------------------------------------------------------
       {
         "tag": "dnspod_doh",
         "type": "https",
-        "server": "doh.pub",                          // [!]
+        "server": "doh.pub",  // [!] 腾讯DNSPod DoH
         "domain_resolver": "alidns_quic"
       },
 
-      // [+] 腾讯UDP (蜂窝4G/5G主力, 三网低延迟)
+      // ---------------------------------------------------------------------
+      // 腾讯UDP: 蜂窝主力
+      // 疑问: 为什么手机流量用UDP, WiFi用DoH?
+      // 回答: 蜂窝网络天然丢包率高, HTTPS的TLS握手开销大
+      //       UDP更轻量(8字节头 vs TLS几十KB握手)
+      //       腾讯DNSPod的119.29.29.29在三网基站侧都有节点
+      // ---------------------------------------------------------------------
       {
         "tag": "dnspod_quic",
         "type": "udp",
-        "server": "119.29.29.29"                      // [!]
+        "server": "119.29.29.29"
+                              // [!] 腾讯公共DNS UDP
       },
 
-      // [*] 原ggdns_doh: 无domain_resolver → 加了
+      // ---------------------------------------------------------------------
+      // Google DoH: 国外DNS主力, 经代理防止污染
+      // 疑问: detour:"PROXY" 和 domain_resolver 不冲突吗?
+      // 回答: 不冲突。domain_resolver 解决的是"dns.google的IP是什么"
+      //       detour 解决的是"查到IP后走哪条路连接它"
+      //       → 先用 alidns_quic 查到 dns.google 的IP
+      //       → 再走 PROXY 出站连接这个IP做DoH查询
+      // ---------------------------------------------------------------------
       {
         "tag": "ggdns_doh",
         "type": "https",
-        "server": "dns.google",                       // [!]
-        "detour": "PROXY",
-        "domain_resolver": "alidns_quic"              // [+] 必须: 解析自身域名
+        "server": "dns.google",
+                              // [!] Google Public DNS
+                              // 国外域名用这个解析, 不走国内DNS防污染
+        "detour": "PROXY",    // 走代理连接(代码理出口)
+        "domain_resolver": "alidns_quic"
+                              // 解释: dns.google 被污染时
+                              // alidns_quic(223.5.5.5)在国内解析到的IP
+                              // 可能是被污染的, 但没关系——
+                              // 只要解析出一个IP, 连接走PROXY代理
+                              // Google DNS服务器在国外, 经代理可达
       },
 
-      // [+] Cloudflare DoH (国外备用)
+      // ---------------------------------------------------------------------
+      // Cloudflare DoH: 国外备用
+      // 疑问: Google已经够了, 为什么加CF?
+      // 回答: Google偶尔被限速/不可达, 有CF备用多一条命
+      //       改 dns.final 即可切过去
+      // ---------------------------------------------------------------------
       {
         "tag": "cfdns_doh",
         "type": "https",
-        "server": "cloudflare-dns.com",               // [!]
+        "server": "cloudflare-dns.com",
+                              // [!] Cloudflare DNS
         "detour": "PROXY",
         "domain_resolver": "alidns_quic"
       },
 
-      // (无变更)
+      // ---------------------------------------------------------------------
+      // FakeIP: 虚拟IP, 代理专用
+      // 疑问: FakeIP是什么? 为什么198.18.0.0/15?
+      // 回答: FakeIP是"不查DNS直接返回假IP"的DNS服务器
+      //       查 google.com → 返回 198.18.0.x(假IP)
+      //       连接 198.18.0.x:443 → sing-box根据映射表找到
+      //       "这个IP对应google.com" → 走PROXY出站连接真正的google.com
+      //       好处: 中间零延迟, Google等域名不需要实际DNS查询
+      //       198.18.0.0/15 是RFC保留的测试网段, 不会和真实IP冲突
+      // ---------------------------------------------------------------------
       {
         "tag": "fakeip",
         "type": "fakeip",
         "inet4_range": "198.18.0.0/15"
+                              // 可分配的假IP范围, 约13万个
       }
+
+      // 总计: 8个DNS服务器
+      // 链式依赖: alidns_quic(IP)
+      //             → alidns_doh(域名) → alidns_quic解析
+      //             → dnspod_doh(域名) → alidns_quic解析
+      //             → ggdns_doh(域名)  → alidns_quic解析 → 再走PROXY连接
+      //             → cfdns_doh(域名)  → alidns_quic解析 → 再走PROXY连接
+      //           dnspod_quic(IP)      → 无依赖
+      //           fakeip                → 不查真实DNS
+      //           local                 → 系统调用
     ],
 
     "rules": [
       // -----------------------------------------------------------------------
-      // [+] 新增规则[0]: 蜂窝网络 → 腾讯UDP
-      //     4G/5G下用UDP(低开销低延迟), WiFi走下面规则[1]的DoH
+      // 规则[0]: 蜂窝网络 + local/小米/Google统计域名 → 腾讯UDP
+      // 逻辑: 4G/5G下这些不需要加密的域名走腾讯UDP, 省电省流量
+      // 为什么这些域名不需要加密? 
+      //   .local/.lan = 局域网, 加密没用
+      //   tracking/firebaselogging = 统计跟踪域名, 已被广告规则拦截
+      //   但DNS查询阶段先解析出来(不然不知道它是广告)
       // -----------------------------------------------------------------------
       {
-        "network_type": "cellular",                   // [+] 新增条件
+        "network_type": "cellular",
+                              // 只在手机流量下匹配(WiFi跳过此条, 走规则[1])
         "domain_suffix": [
-          ".local",
-          ".lan",
-          "miwifi.com",                               // [!]
-          "tplogin.cn",                               // [!]
-          "router.asus.com",                          // [!]
-          "tendawifi.com",                            // [!]
-          "tplinkwifi.net",                           // [!]
-          "app-measurement.com",                      // [!]
-          "hm.baidu.com",                             // [!]
-          "firebaselogging.googleapis.com",           // [!]
-          "firebaselogging-pa.googleapis.com",        // [!]
-          "beacons.gvt2.com",                         // [!]
-          "beacons2.gvt2.com",                        // [!]
-          "beacons3.gvt2.com",                        // [!]
-          "tracking.miui.com",                        // [!]
-          "market.xiaomi.com",                        // [!]
-          "lancache.steamcontent.com"                 // [!]
+          ".local",           // mDNS 局域网
+          ".lan",             // 家庭内网(路由器常用)
+          "miwifi.com",       // [!] 小米路由器管理页
+          "tplogin.cn",       // [!] TP-Link路由器
+          "router.asus.com",  // [!] 华硕路由器
+          "tendawifi.com",    // [!] 腾达路由器
+          "tplinkwifi.net",   // [!] TP-Link WiFi设置
+          "app-measurement.com",
+                              // [!] Google Firebase统计
+          "hm.baidu.com",     // [!] 百度统计
+          "firebaselogging.googleapis.com",
+                              // [!] Firebase日志(Telegram等App使用)
+          "firebaselogging-pa.googleapis.com",
+                              // [!] Firebase日志备用
+          "beacons.gvt2.com", // [!] Google分析信标
+          "beacons2.gvt2.com",// [!] Google信标2
+          "beacons3.gvt2.com",// [!] Google信标3
+          "tracking.miui.com",// [!] 小米MIUI统计上报
+          "market.xiaomi.com",// [!] 小米应用商店
+          "lancache.steamcontent.com"
+                              // [!] Steam局域网缓存(加速游戏下载)
         ],
-        "server": "dnspod_quic"                       // [+] 蜂窝走腾讯UDP
+        "server": "dnspod_quic"
+                              // 蜂窝→腾讯UDP, 三网低延迟
       },
 
-      // [*] 原规则[0]: "server":"alidns_udp" → "alidns_doh"
+      // -----------------------------------------------------------------------
+      // 规则[1]: WiFi + 同上域名 → 阿里DoH(加密)
+      // 逻辑: WiFi下带宽充裕, 用DoH加密防运营商劫持
+      // 疑问: 为什么不直接合并成一条不用network_type?
+      // 回答: 区分蜂窝/WiFi可以实现DNS层面的"三网优化"
+      //       蜂窝UDP更快, WiFi DoH更安全
+      // -----------------------------------------------------------------------
       {
         "domain_suffix": [
           ".local",
           ".lan",
-          "miwifi.com",                               // [!]
-          "tplogin.cn",                               // [!]
-          "router.asus.com",                          // [!]
-          "tendawifi.com",                            // [!]
-          "tplinkwifi.net",                           // [!]
-          "app-measurement.com",                      // [!]
-          "hm.baidu.com",                             // [!]
-          "firebaselogging.googleapis.com",           // [!]
-          "firebaselogging-pa.googleapis.com",        // [!]
-          "beacons.gvt2.com",                         // [!]
-          "beacons2.gvt2.com",                        // [!]
-          "beacons3.gvt2.com",                        // [!]
-          "tracking.miui.com",                        // [!]
-          "market.xiaomi.com",                        // [!]
-          "lancache.steamcontent.com"                 // [!]
+          "miwifi.com",       // [!]
+          "tplogin.cn",       // [!]
+          "router.asus.com",  // [!]
+          "tendawifi.com",    // [!]
+          "tplinkwifi.net",   // [!]
+          "app-measurement.com",
+                              // [!]
+          "hm.baidu.com",     // [!]
+          "firebaselogging.googleapis.com",
+                              // [!]
+          "firebaselogging-pa.googleapis.com",
+                              // [!]
+          "beacons.gvt2.com", // [!]
+          "beacons2.gvt2.com",// [!]
+          "beacons3.gvt2.com",// [!]
+          "tracking.miui.com",// [!]
+          "market.xiaomi.com",// [!]
+          "lancache.steamcontent.com"
+                              // [!]
         ],
-        "server": "alidns_doh"                        // [*] 原 alidns_udp
+        "server": "alidns_doh"
+                              // WiFi→阿里DoH加密
       },
 
-      // [*] 原: "domain_suffix":["节点域名"] → 覆盖全部节点域名
+      // -----------------------------------------------------------------------
+      // 规则[2]: 节点/机场域名 → Google DoH(经代理, 防DNS污染)
+      // 疑问: 为什么节点域名要单独处理?
+      // 回答: 机场节点域名可能被DNS污染(返回假IP)
+      //       必须走国外DNS(Google/CF通过代理)才能拿到真实IP
+      //       否则 sing-box 连不上节点, 整个代理失效
+      // 疑问: .xxx 和 xxx 有什么区别?
+      // 回答: ".372164885.xyz" 匹配所有子域名(pk1.xxx / pk5.xxx / direct.xxx)
+      //       "372164885.xyz" 只匹配裸域名本身
+      //       两者都要加, 不然裸域名被漏掉
+      // -----------------------------------------------------------------------
       {
         "domain_suffix": [
-          ".节点域名后缀1",                           // [!] 原 "节点域名"占位符
-          ".节点域名后缀2",                           // [!] 新增
-          "节点裸域名"                                // [!] 新增
+          ".节点域名后缀1",   // [!] 匹配所有子域名
+          ".节点域名后缀2",   // [!] 新增: 另一节点的域名
+          "节点裸域名"        // [!] 新增: 裸域名本身(无子域名前缀)
         ],
-        "server": "ggdns_doh"
+        "server": "ggdns_doh" // Google DoH 经 PROXY
       },
 
-      // (无变更)
+      // -----------------------------------------------------------------------
+      // 规则[3]: 广告规则集 → reject(返回0.0.0.0或直接拒绝)
+      // 疑问: reject 和 返回127.0.0.1 有什么区别?
+      // 回答: reject 直接拒绝DNS查询, App收到查询失败
+      //       返回127.0.0.1 App还会尝试连接(超时耗时)
+      //       reject 更彻底、更快
+      // -----------------------------------------------------------------------
       {
         "rule_set": [
-          "geosite_adguard",
+          "geosite_adguard",  // AdGuard过滤器(社区维护的广告域名合集)
           "geosite-category-ads-all"
+                              // sing-geosite 广告分类(官方)
         ],
-        "action": "reject"
+        "action": "reject"    // 直接拒绝
       },
 
-      // (无变更)
+      // -----------------------------------------------------------------------
+      // 规则[4]: SVCB/HTTPS/PTR查询 → 拒绝
+      // 疑问: 为什么要拒绝这些DNS记录类型?
+      // 回答: SVCB/HTTPS记录是DNS ECH(加密ClientHello)的辅助记录
+      //       国内很多CDN不支持, 查询这些记录反而导致
+      //       连接卡顿、部分网站打不开
+      //       PTR(反向解析)在代理场景下没有意义, 直接拒
+      // -----------------------------------------------------------------------
       {
         "query_type": [
-          "SVCB",
-          "HTTPS",
-          "PTR"
+          "SVCB",             // Service Binding (DNS ECH辅助)
+          "HTTPS",            // HTTPS记录(类似SVCB)
+          "PTR"               // 反向解析(IP→域名)
         ],
         "action": "reject"
       },
 
-      // [*] 原: 有 "client_subnet":"xxx" → 移到dns全局参数
+      // -----------------------------------------------------------------------
+      // 规则[5]: proxy/games/ai规则集 → FakeIP(A和AAAA查询)
+      // 逻辑: 这些域名需要走代理, 用FakeIP跳过真实DNS, 零延迟
+      // 为什么只匹配A和AAAA? 
+      //   其他类型(NS/MX/TXT/SOA)由final(ggdns_doh)兜底
+      // rewrite_ttl=300: FakeIP在DNS缓存中保留300秒(5分钟)
+      // 疑问: 300秒会不会太短?
+      // 回答: 对FakeIP来说TTL是"IP→域名映射的有效期"
+      //       300秒足够, 且过期后自动刷新不会断
+      // -----------------------------------------------------------------------
       {
-        "rule_set": ["proxy", "games", "ai"],
-        "query_type": ["A", "AAAA"],
+        "rule_set": [
+          "proxy",            // 代理分流规则集(机场推荐)
+          "games",            // 游戏平台(Steam/Epic等)
+          "ai"                // AI服务(ChatGPT/Gemini等)
+        ],
+        "query_type": [
+          "A",                // IPv4地址查询
+          "AAAA"              // IPv6地址查询
+                              // 即使 strategy:ipv4_only, 也可以查AAAA
+                              // 查询后直接丢弃不返回给App
+        ],
         "server": "fakeip",
-        "rewrite_ttl": 300
-        // [-] "client_subnet": "119.134.100.0/24"  移到全局
+        "rewrite_ttl": 300    // FakeIP缓存5分钟
       },
 
-      // (无变更)
+      // -----------------------------------------------------------------------
+      // 规则[6]: Google Play域名 → FakeIP
+      // 与规则[5]有重叠但更精确——Play商店/下载/用户内容
+      // -----------------------------------------------------------------------
       {
         "domain_suffix": [
-          "play.google.com",                          // [!]
-          "ggpht.com",                                // [!]
-          "googleusercontent.com",                    // [!]
-          "android.com"                               // [!]
+          "play.google.com",  // [!] Google Play商店
+          "ggpht.com",        // [!] Google用户内容CDN
+          "googleusercontent.com",
+                              // [!] Google用户内容
+          "android.com"       // [!] Android官网
         ],
         "server": "fakeip"
       },
 
-      // [*] "server":"alidns_udp" → "alidns_doh"
+      // -----------------------------------------------------------------------
+      // 规则[7]: Clash面板切Direct → 国内DoH
+      // 用户手动切直连模式, 所有DNS走国内DoH
+      // -----------------------------------------------------------------------
       {
         "clash_mode": "direct",
-        "server": "alidns_doh"                        // [*] 原 alidns_udp
+                              // 面板选Direct模式时触发
+        "server": "alidns_doh"
       },
 
-      // (无变更)
+      // -----------------------------------------------------------------------
+      // 规则[8]: Clash面板切Global → FakeIP(全代理)
+      // 用户手动切全局模式, 所有DNS走FakeIP→全走代理
+      // -----------------------------------------------------------------------
       {
         "clash_mode": "global",
         "server": "fakeip"
       }
+
+      // 规则匹配逻辑:
+      // sing-box从上到下逐条匹配, 第一条命中即停止
+      // 疑问: 如果某个域名同时满足两条规则(如geo和域名)怎么办?
+      // 回答: 第一条命中的生效, 后面的忽略
+      //       所以规则的顺序至关重要
+      //       当前顺序: 蜂窝优先 → WiFi → 节点 → 广告 → DNS类型过滤
+      //                 → 代理分流 → Google → 面板模式
     ],
 
     // -------------------------------------------------------------------------
-    // DNS 全局参数
+    // DNS全局参数
     // -------------------------------------------------------------------------
+
     "final": "ggdns_doh",
+    // 疑问: "final"是什么?
+    // 回答: 所有DNS规则都没匹配到的查询, 走final指定的服务器
+    //       ggdns_doh=Google DoH经PROXY → 未匹配的默认走代理DNS
+    //       这确保了"默认走代理", 符合安全原则
+
     "strategy": "ipv4_only",
+    // 限制只返回IPv4地址
+    // 疑问: 为什么不要IPv6?
+    // 回答: 绝大多数机场不支持IPv6
+    //       如果返回IPv6地址, 连接会fallback到IPv4(额外延迟)
+    //       或者直接连不上(如果网络有IPv6但机场没有)
+    //       设为ipv4_only可以避免这个问题
+
     "reverse_mapping": true,
+    // IP→域名反向映射
+    // 解释: 当DNS查询返回IP后, sing-box记住"这个IP=这个域名"
+    //       后续App直接连IP时, 路由规则能根据映射找到原始域名
+    //       → 即使App用了IP直连, 也能按域名规则分流
+    // 疑问: 什么场景会用到?
+    // 回答: Chrome/WebView有时缓存了DNS结果, 直接用IP连接
+    //       如果没有reverse_mapping, IP连接就看不出是哪个域名,
+    //       只能走final出站(PROXY), 国内网站也被代理
+    //       有了它, 即使IP直连也能查出原本域名, 正确分流
 
-    // [+] 新增: EDNS client-subnet (告知CDN用户网段)
-    "client_subnet": "用户IP段/24",                   // [!]
+    "client_subnet": "你的IP段/24",
+    // [!] EDNS0 Client Subnet
+    // 告诉DNS服务器"用户是这个网段的", CDN返回最近的服务器
+    // 疑问: 填机场IP段有用吗? 不是应该填真实IP吗?
+    // 回答: 填真实IP段效果最好(CDN选离你最近的节点)
+    //       但填机场IP段也能用, 至少不会暴露你的真实IP给DNS
 
-    // [*] 8000 → 65536 (缓存扩容8倍)
     "cache_capacity": 65536
+    // [*] 原 8000 → 65536
+    // LRU缓存容量: 同时缓存最多65536条DNS记录
+    // 疑问: 65536够吗? 手机会不会爆?
+    // 回答: 每条记录约50字节, 65536条约3.2MB
+    //       日常浏览约需2000~20000条活跃记录
+    //       65536远远超出需求, 确保不会频繁淘汰
   },
 
   // =========================================================================
-  // 入站
+  // 入站模块
+  // 疑问: 为什么要两个入站(tun + mixed)?
+  // 回答: tun 是全局VPN(所有App流量被路由过来)
+  //       mixed 是本机SOCKS/HTTP代理(7890端口)
+  //       某些不支持VPN的App可以手动设代理指向7890
+  //       两者互补, 一个都不能少
   // =========================================================================
   "inbounds": [
     {
       "type": "tun",
+      // TUN: 虚拟网卡, Android VPN服务核心
       "tag": "tun-in",
+      // 标签, 可被路由规则引用(如inbound:["tun-in"])
       "address": [
         "10.8.0.1/24"
+        // TUN网卡地址: 10.8.0.1, 子网255.255.255.0
+        // 疑问: 为什么是10.8.0.x?
+        // 回答: 10.0.0.0/8是私有地址, 通常不会和WiFi/蜂窝冲突
+        //       10.8.0.1选这个具体地址没有特殊含义,
+        //       只用了一个不常用的子网段
+        // 疑问: 哪个地址是"手机自己的"?
+        // 回答: 10.8.0.1是TUN接口, 10.8.0.2是内部DNS服务器
+        //       App流量: App → TUN(sing-box) → 出站
       ],
       "mtu": 1500,
+      // MTU=最大传输单元(字节)
+      // 疑问: 为什么要设1500?
+      // 回答: 以太网标准MTU=1500
+      //       太大 → 数据包被运营商分片(丢包率上升)
+      //       太小 → 每个包开销占比高(带宽浪费)
+      //       1500是经过广泛验证的最优值
       "stack": "mixed",
+      // TCP/IP协议栈实现方式
+      // 可选: gvisor(用户态, 兼容性最好) / system(内核态, 性能最好)
+      //       mixed(混合)
+      // 疑问: Android用哪个最稳?
+      // 回答: gvisor 兼容性最好但性能略低
+      //       system 性能最好但部分ROM可能出问题
+      //       mixed 由sing-box自动选择(推荐)
       "auto_route": true,
+      // 自动接管系统路由表
+      // 开启后所有App流量自动走TUN, 不需要手动设代理
+      // 疑问: 关闭会怎样?
+      // 回答: 只有显式指向TUN的流量才代理
+      //       等于"透明代理"变成"手动代理", 失去全局性
       "strict_route": true,
+      // 严格路由: 防止流量绕过TUN
+      // Linux: 添加 iproute2 策略路由
+      // Android: 配合VPN服务强制所有流量走TUN
+      // 疑问: 关掉strict_route会怎样?
+      // 回答: 部分系统流量可能绕过代理(如DNS), 造成泄露
 
-      // [+] 新增: UDP空闲30秒关闭(省电)
       "udp_timeout": "30s"
+      // [+] 新增: UDP会话空闲30秒后关闭
+      // 疑问: 为什么30秒?
+      // 回答: 大部分UDP(QUIC/DNS/WebRTC)活跃度远超30秒
+      //       30秒无流量的UDP通常是已经断开的旧连接
+      //       及时关闭减少手机待机耗电和连接数
 
-      // [-] 删除: sniff_timeout / sniff_override_destination
-      //     1.13.0已从入站移除, sniff改用 route.rules action:"sniff"
+      // [-] sniff_timeout 和 sniff_override_destination 已删除
+      //     在sing-box 1.11.0中废弃, 1.13.0中移除
+      //     sniff功能的正确方式: 在 route.rules 中使用 action:"sniff"
+      //     不需要在入站配置任何sniff参数
     },
     {
       "type": "mixed",
+      // mixed = SOCKS5 + HTTP 代理合二为一
       "tag": "mixed-in",
       "listen": "127.0.0.1",
+      // 只监听本地回环(本机), 不对外开放
+      // 疑问: 为什么不监听0.0.0.0?
+      // 回答: 开放给其他设备有安全风险(无认证)
+      //       其他设备想用代理, 可以连手机热点,
+      //       但TUN已经接管了所有流量, 不需要额外监听
       "listen_port": 7890
+      // 常见端口号, 无特殊含义
     }
   ],
 
   // =========================================================================
-  // 出站 (节点区)
+  // 出站模块
   // =========================================================================
   "outbounds": [
-    // (无变更)
+    // -----------------------------------------------------------------------
+    // DIRECT: 直连(不走代理)
+    // -----------------------------------------------------------------------
     {
       "type": "direct",
       "tag": "DIRECT"
     },
 
-    // (无变更)
+    // -----------------------------------------------------------------------
+    // PROXY: 代理选择器(面板可见, 用户手动切节点)
+    // 疑问: 为什么列表里包含DIRECT?
+    // 回答: 方便用户在面板里直接切直连, 无需切换模式
+    //       default:"AUTO"表示默认自动测速选最优
+    // -----------------------------------------------------------------------
     {
       "type": "selector",
+      // 选择器 = 用户手动从列表选一个
       "tag": "PROXY",
+      // 这个tag被route规则引用: "outbound":"PROXY"
       "outbounds": [
         "AUTO",
         "pkpk01",
@@ -277,10 +553,27 @@
         "DIRECT"
       ],
       "default": "AUTO",
+      // 默认自动测速选节点
       "interrupt_exist_connections": false
+      // [*] 原 true? → 保持false
+      // 疑问: 切换节点时, 已有连接要不要断?
+      // 回答: false = 不断已有连接, 新连接用新节点
+      //       好处: 下载不中断
+      //       坏处: 切节点后部分流量还走旧线路
+      //       对于日常使用, false体验更好
+      //       如果注重安全和一致性, 改true
     },
 
-    // (无变更)
+    // -----------------------------------------------------------------------
+    // AUTO: 自动测速选最优节点
+    // 疑问: URLTest和Selector有什么区别?
+    // 回答: URLTest自动测所有节点延迟, 选最快的
+    //       Selector 是用户手动选的
+    //       两者互补: AUTO是自动最优, PROXY可手动覆盖
+    // 疑问: 测速URL用 http://cp.cloudflare.com 有什么讲究?
+    // 回答: 它是Cloudflare的一个纯文本页面(很小)
+    //       任何节点都应该能访问, 测的是"隧道内的连通性"
+    // -----------------------------------------------------------------------
     {
       "type": "urltest",
       "tag": "AUTO",
@@ -293,13 +586,26 @@
         "pkpk06"
       ],
       "url": "http://cp.cloudflare.com/",
+      // 测速目标: Cloudflare
       "interval": "10m",
+      // 每10分钟测一次
       "tolerance": 50,
+      // 容差50ms: 延迟差<50ms的视为并列最优
+      // 疑问: 为什么设容差?
+      // 回答: 避免频繁切换。网络抖动几毫秒很正常
+      //       50ms容差让结果稳定
       "idle_timeout": "30m",
+      // 空闲30分钟暂停测速(省电省流量)
       "interrupt_exist_connections": false
     },
 
-    // (无变更)
+    // -----------------------------------------------------------------------
+    // GLOBAL: 面板全局模式选择器
+    // 疑问: 为什么GLOBAL和PROXY是两个不同的选择器?
+    // 回答: PROXY管"代理流量走哪个节点"
+    //       GLOBAL在全局模式(面板切Global)时才被触发
+    //       此时GLOBAL指向PROXY → 所有流量走PROXY→选节点
+    // -----------------------------------------------------------------------
     {
       "type": "selector",
       "tag": "GLOBAL",
@@ -311,7 +617,13 @@
       "interrupt_exist_connections": false
     },
 
-    // (无变更)
+    // -----------------------------------------------------------------------
+    // CN: 面板回国模式选择器(未在route中使用, 预留)
+    // 疑问: CN选择器和clash_mode:direct有什么区别?
+    // 回答: CN是一个选择器(可以被路由规则引用)
+    //       clash_mode是DNS规则中的一个匹配条件
+    //       两者独立, CN目前未被任何路由引用, 预留
+    // -----------------------------------------------------------------------
     {
       "type": "selector",
       "tag": "CN",
@@ -323,73 +635,139 @@
       "interrupt_exist_connections": false
     },
 
-    // -------------------------------------------------------------------------
-    // pkpk01: reality VLESS
-    // -------------------------------------------------------------------------
+    // =====================================================================
+    // 节点: pkpk01 - reality VLESS
+    // 协议: VLESS + TLS 1.3 + reality(防主动探测)
+    // reality: 不依赖域名, 伪装成别人家的TLS流量
+    // 兼容性: 不支持 h2mux 多路复用
+    // =====================================================================
     {
       "type": "vless",
+      // VLESS: 轻量级无加密传输(依靠TLS加密)
       "tag": "pkpk01",
-      "server": "节点服务器地址",                    // [!]
+      "server": "节点服务器地址",
+      // [!] reality直连服务器
       "server_port": 7173,
-      "uuid": "屏蔽的UUID",                         // [!]
+      // 非标准端口, 不容易被扫到
+      "uuid": "屏蔽的UUID",
+      // [!] VLESS用户标识
       "flow": "xtls-rprx-vision",
+      // XTLS Vision流控: 减少TLS握手开销
+      // 疑问: 为什么reality必须用vision flow?
+      // 回答: vision是专门为reality设计的流量整形算法
+      //       让代理流量看起来更像正常TLS流量
+      //       没有它, 防火墙可以识别出代理特征
 
-      // [+] 新增: TCP Fast Open (重连跳过三次握手)
+      // [+] tcp_fast_open: 重连跳过三次握手
+      // 疑问: 手机和服务器都支持才生效, 不支持会怎样?
+      // 回答: 不支持就静默退化到普通TCP, 不影响连通性
+      //       支持时首次数据在SYN包中就发出, 减少1个RTT
       "tcp_fast_open": true,
 
       "tls": {
         "enabled": true,
-        "server_name": "addons.mozilla.org",         // [!] reality伪装域名
+        "server_name": "addons.mozilla.org",
+        // [!] reality伪装域名
+        // 疑问: 为什么是 addons.mozilla.org?
+        // 回答: 服务端配置的"伪装目标"
+        //       GFW看到的是你在访问Mozilla插件网站
+        //       (一个真实、无害、广为人知的网站)
+        //       只要目标网站在国内能正常访问, 伪装就有效
         "utls": {
           "enabled": true,
+          // uTLS: TLS指纹伪装
+          // 不用Go标准库的TLS(指纹独特易识别)
+          // 改用Firefox的TLS握手方式(指纹和大厂浏览器一样)
           "fingerprint": "firefox"
+          // 伪装成Firefox浏览器的TLS指纹
+          // 可选: chrome / safari / ios / android / random
         },
         "reality": {
           "enabled": true,
-          "public_key": "屏蔽的PublicKey"            // [!]
+          // reality: TLS伪装协议
+          // 原理: 发送"看起来像"目标网站的ClientHello
+          //       被代理服务器解密后转发给VLESS服务器
+          "public_key": "屏蔽的PublicKey"
+          // [!] reality公钥, 和服务器配对
         }
       },
+
       "multiplex": {
-        // [-] 删除: "enabled":true  ← 之前修复时误加
-        //     reality VLESS 不兼容 h2mux, 无enabled=禁用(正确)
+        // 多路复用: 单一TLS连接承载多个TCP流
+        // 疑问: 为什么reality VLESS不启用enabled?
+        // 回答: h2mux 需要特殊的协议协商(reality+vision有自己的),
+        //       两者冲突 → 连接建立后立即断开
+        //       所以 multiplex.enabled 保持缺失(=禁用)
+        //       这是旧版配置能用的关键原因
         "protocol": "h2mux",
-
-        // [*] max_connections → max_streams (h2mux正确字段名)
+        // [*] SMUX → h2mux
+        // h2mux: 基于HTTP/2帧的多路复用, 更高效
         "max_streams": 16,
-
-        "padding": true,                             // [+] 新增: 混淆流量特征
-
+        // [*] 原 max_connections → max_streams(正确字段)
+        // 一个连接最多承载16个并发流
+        // 疑问: 16个够吗?
+        // 回答: 正常网页浏览5~10个并发流
+        //       16个覆盖绝大多数场景
+        //       超过时建立新连接, 不会阻塞
+        "padding": true,
+        // [+] 新增: 填充帧 → 混淆流量特征
+        // 疑问: padding做什么?
+        // 回答: 在数据帧中插入随机长度填充
+        //       让流量分析工具无法通过包大小识别应用
         "brutal": {
           "up_mbps": 1000,
           "down_mbps": 1000
+          // Brutal拥塞控制: 模拟1Gbps带宽
+          // 疑问: 为什么设1000?
+          // 回答: 这不是"限制你到1Gbps"
+          //       而是告诉拥塞算法"假设带宽是1Gbps"
+          //       → 更激进地发送数据 → 减少空闲等待
+          //       实际网速受物理带宽限制, 不是这个值
         }
       },
+
       "packet_encoding": "xudp"
+      // XUDP: VLESS专用的UDP-over-TCP封装
+      // 作用: 让UDP流量(游戏/语音/DNS)走VLESS
+      // 疑问: 没有这个会怎样?
+      // 回答: VLESS默认只支持TCP
+      //       不加xudp=所有UDP被丢弃(YouTube直播/游戏/WebRTC会断)
     },
 
-    // -------------------------------------------------------------------------
-    // pkpk02: WS VLESS
-    // -------------------------------------------------------------------------
+    // =====================================================================
+    // pkpk02: WS VLESS (WebSocket + TLS)
+    // 适用场景: CDN中转(Cloudflare/Nginx前置)
+    // multiplex.enabled=true: WS VLESS兼容h2mux ✅
+    // =====================================================================
     {
       "type": "vless",
       "tag": "pkpk02",
-      "server": "节点服务器地址",                    // [!]
+      "server": "节点服务器地址",
+      // [!]
       "server_port": 443,
-      "uuid": "屏蔽的UUID",                         // [!]
+      // 标准HTTPS端口(不易被墙)
+      "uuid": "屏蔽的UUID",
+      // [!]
 
-      // [+] 新增
       "tcp_fast_open": true,
+      // [+] 新增
 
       "tls": {
         "enabled": true,
-        "server_name": "节点TLS域名",               // [!]
+        "server_name": "节点TLS域名",
+        // [!] 必须和服务器TLS证书的CN/SAN一致
         "utls": {
           "enabled": true,
           "fingerprint": "firefox"
         }
       },
       "multiplex": {
+        // WS VLESS 支持h2mux ✅
         "enabled": true,
+        // 疑问: WS VLESS为什么支持h2mux而reality不支持?
+        // 回答: WS (WebSocket) 本身是HTTP的升级协议
+        //       h2mux 基于HTTP/2帧 → 天然兼容WS
+        //       reality是原始TLS → 没有HTTP层 → 不兼容h2mux
         "protocol": "h2mux",
         "max_streams": 16,
         "padding": true,
@@ -399,32 +777,50 @@
         }
       },
       "transport": {
+        // 传输层: WebSocket
         "type": "ws",
-        "path": "/sba-vl",                           // [!]
+        // WebSocket: 基于HTTP的持久连接
+        // 优势: 兼容CDN/反向代理, 可套Cloudflare
+        "path": "/代理路径",
+        // [!] WebSocket路径, CDN根据路径转发到后端
         "headers": {
-          "Host": "节点TLS域名"                     // [!]
+          "Host": "节点TLS域名"
+          // [!] HTTP Host头, CDN用来区分不同后端
         },
         "max_early_data": 2560,
+        // WebSocket 0-RTT 数据量(字节)
+        // 疑问: 2560会不会太大?
+        // 回答: 这是可选优化, 支持0-RTT时在TLS握手完成前
+        //       就能发2560字节数据(加速首包)
         "early_data_header_name": "Sec-WebSocket-Protocol"
+        // 0-RTT的HTTP头名, 标准值
       }
     },
 
-    // -------------------------------------------------------------------------
+    // =====================================================================
     // pkpk03: WS VLESS 套CDN
-    // -------------------------------------------------------------------------
+    // server 是CDN节点的地址(不是源站)
+    // 疑问: server=CDN地址, server_name=源站域名, 什么原理?
+    // 回答: 连接 → CDN(server: CDN地址, TLS SNI: 源站域名)
+    //       CDN查SNI和Host头 → 转发到真正的VLESS服务器
+    //       对GFW: 你在访问CDN, 属于正常行为
+    // =====================================================================
     {
       "type": "vless",
       "tag": "pkpk03",
-      "server": "CDN伪装域名",                       // [!]
+      "server": "CDN伪装地址",
+      // [!] 连接的目标地址(CDN节点IP或域名)
       "server_port": 443,
-      "uuid": "屏蔽的UUID",                         // [!]
+      "uuid": "屏蔽的UUID",
+      // [!]
 
-      // [+] 新增
       "tcp_fast_open": true,
+      // [+] 新增
 
       "tls": {
         "enabled": true,
-        "server_name": "节点TLS域名",               // [!]
+        "server_name": "节点TLS域名",
+        // [!] TLS SNI: CDN用这个区分客户和转发目标
         "utls": {
           "enabled": true,
           "fingerprint": "firefox"
@@ -442,31 +838,37 @@
       },
       "transport": {
         "type": "ws",
-        "path": "/sba-vl",                           // [!]
+        "path": "/代理路径",
+        // [!]
         "headers": {
-          "Host": "节点TLS域名"                     // [!]
+          "Host": "节点TLS域名"
+          // [!] CDN用Host头区分客户
         },
         "max_early_data": 2560,
         "early_data_header_name": "Sec-WebSocket-Protocol"
       }
     },
 
-    // -------------------------------------------------------------------------
-    // pkpk04: WS VLESS 套CF
-    // -------------------------------------------------------------------------
+    // =====================================================================
+    // pkpk04: WS VLESS 套Cloudflare
+    // 与pkpk03同理, 只是CDN地址不同
+    // =====================================================================
     {
       "type": "vless",
       "tag": "pkpk04",
-      "server": "CF伪装地址",                        // [!]
+      "server": "CF伪装地址",
+      // [!]
       "server_port": 443,
-      "uuid": "屏蔽的UUID",                         // [!]
+      "uuid": "屏蔽的UUID",
+      // [!]
 
-      // [+] 新增
       "tcp_fast_open": true,
+      // [+] 新增
 
       "tls": {
         "enabled": true,
-        "server_name": "节点TLS域名",               // [!]
+        "server_name": "节点TLS域名",
+        // [!]
         "utls": {
           "enabled": true,
           "fingerprint": "firefox"
@@ -484,31 +886,36 @@
       },
       "transport": {
         "type": "ws",
-        "path": "/sba-vl",                           // [!]
+        "path": "/代理路径",
+        // [!]
         "headers": {
-          "Host": "节点TLS域名"                     // [!]
+          "Host": "节点TLS域名"
+          // [!]
         },
         "max_early_data": 2560,
         "early_data_header_name": "Sec-WebSocket-Protocol"
       }
     },
 
-    // -------------------------------------------------------------------------
-    // pkpk05: WS VLESS 裸域
-    // -------------------------------------------------------------------------
+    // =====================================================================
+    // pkpk05: WS VLESS 裸域(不套CDN)
+    // =====================================================================
     {
       "type": "vless",
       "tag": "pkpk05",
-      "server": "节点裸域名",                        // [!]
+      "server": "节点裸域名",
+      // [!]
       "server_port": 443,
-      "uuid": "屏蔽的UUID",                         // [!]
+      "uuid": "屏蔽的UUID",
+      // [!]
 
-      // [+] 新增
       "tcp_fast_open": true,
+      // [+] 新增
 
       "tls": {
         "enabled": true,
-        "server_name": "节点TLS域名",               // [!]
+        "server_name": "节点TLS域名",
+        // [!]
         "utls": {
           "enabled": true,
           "fingerprint": "firefox"
@@ -526,177 +933,335 @@
       },
       "transport": {
         "type": "ws",
-        "path": "/sba-vl",                           // [!]
+        "path": "/代理路径",
+        // [!]
         "headers": {
-          "Host": "节点TLS域名"                     // [!]
+          "Host": "节点TLS域名"
+          // [!]
         },
         "max_early_data": 2560,
         "early_data_header_name": "Sec-WebSocket-Protocol"
       }
     },
 
-    // -------------------------------------------------------------------------
-    // pkpk06: NaiveProxy (无变更)
-    // -------------------------------------------------------------------------
+    // =====================================================================
+    // pkpk06: NaiveProxy
+    // 协议: HTTPS代理(Chromium网络栈)
+    // 特点: 流量完全像普通HTTPS, 抗封锁极强
+    // 缺点: 不支持多路复用, 不支持tcp_fast_open
+    // 疑问: 为什么NaiveProxy没有transport配置?
+    // 回答: NaiveProxy就是把数据伪装在HTTPS隧道里
+    //       不需要额外WebSocket/QUIC传输层
+    //       它自己就是传输层
+    // =====================================================================
     {
       "type": "naive",
+      // NaiveProxy: Chromium浏览器网络栈 + 代理
       "tag": "pkpk06",
-      "server": "Naive服务器",                       // [!]
+      "server": "Naive服务器地址",
+      // [!]
       "server_port": 443,
-      "username": "屏蔽的用户名",                    // [!]
-      "password": "屏蔽的密码",                      // [!]
+      "username": "屏蔽的用户名",
+      // [!] Naive认证
+      "password": "屏蔽的密码",
+      // [!] Naive认证
       "tls": {
         "enabled": true,
-        "server_name": "Naive域名",                  // [!]
+        "server_name": "Naive域名",
+        // [!]
         "insecure": false
+        // 必须为false: 拒绝不安全的TLS连接
+        // 疑问: 什么情况设true?
+        // 回答: 自签名证书且无法验证时, 但强烈不推荐
+        //       设true = 放弃TLS安全, 运营商可中间人
       }
+      // 无multiplex: NaiveProxy不支持h2mux
+      // 无tcp_fast_open: Naive基于Chromium栈, 自己管理TCP
     }
   ],
 
   // =========================================================================
-  // 路由 (核心变更区: 删除1条 + 移动1条)
+  // 路由模块
+  // 核心逻辑: 流量进入 → 逐条匹配规则 → 命中即停 → 执行动作
+  // 未命中 → 走 final(PROXY)
+  // 规则顺序极其重要!
   // =========================================================================
   "route": {
-    // [*] 原 "alidns_udp" → "alidns_doh"
     "default_domain_resolver": "alidns_doh",
+    // 路由决策时用的DNS
+    // 解释: 路由规则中有IP规则(cnip), 需要先解析域名→IP再匹配
+    //       default_domain_resolver 就是做这个解析的DNS
+    // 疑问: 为什么用国内DoH?
+    // 回答: 解析只为了路由决策, 不是给App用的
+    //       国内DoH快且不会污染, 合适
 
     "rules": [
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[0]: DNS劫持 — 拦截所有DNS流量, 交给sing-box DNS模块
+      // 逻辑: port=53(UDP/TCP DNS) 或 protocol=dns → hijack-dns
+      // 疑问: hijack-dns做什么?
+      // 回答: sing-box接管这个DNS请求,
+      //       按dns.rules重新分流, 返回结果给App
+      //       App不知道DNS被劫持, 一切透明
+      // -------------------------------------------------------------------
       {
         "type": "logical",
+        // 逻辑规则: 支持and/or嵌套
         "mode": "or",
+        // 任一子规则匹配即可
         "rules": [
-          { "port": 53 },
-          { "protocol": "dns" }
+          {
+            "port": 53
+            // 目的端口53
+          },
+          {
+            "protocol": "dns"
+            // 或者协议就是DNS(涵盖DoH/DoT等非标准端口)
+          }
         ],
         "action": "hijack-dns"
+        // 劫持到sing-box DNS
       },
 
-      // (无变更) 1.13.0新方式: sniff由路由规则控制
+      // -------------------------------------------------------------------
+      // 规则[1]: 嗅探 — 检测TLS SNI / HTTP Host
+      // 疑问: sniff做了什么?
+      // 回答: 当App直接用IP连接(如8.8.8.8:443)时
+      //       sing-box读取TLS的SNI("dns.google")
+      //       用SNI代替目的IP进行后续路由匹配
+      //       这样IP直连也能按域名分流
+      // 1.13.0变化: sniff不再在入站配置, 改为路由规则
+      // -------------------------------------------------------------------
       {
         "action": "sniff"
+        // 对匹配的流量进行协议嗅探
+        // 没有额外参数 — 1.13.0的sniff行为是全自动的
       },
 
-      // [-] 删除: { "network_type":"cellular","outbound":"DIRECT" }
-      //     旧版: 4G/5G下所有流量直连, proxy/ai/games规则全被跳过
-      //     新版: 删掉, 蜂窝和WiFi用同一套分流
+      // [-] 此处原有一条: { "network_type":"cellular","outbound":"DIRECT" }
+      //     已删除, 原因见底部注释
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[2]: 小米路由器域名 → 直连
+      // 即使开了代理也能访问路由器管理页
+      // -------------------------------------------------------------------
       {
-        "domain_suffix": ["miwifi.com"],              // [!]
+        "domain_suffix": [
+          "miwifi.com"
+          // [!]
+        ],
         "outbound": "DIRECT"
+        // 动作: 直连(不经代理)
       },
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[3]: Clash面板Direct模式 → 直连
+      // 用户手动切"直连模式"
+      // -------------------------------------------------------------------
       {
         "clash_mode": "direct",
         "outbound": "DIRECT"
       },
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[4]: Clash面板Global模式 → GLOBAL出站
+      // GLOBAL出站默认指向PROXY → 全走代理
+      // -------------------------------------------------------------------
       {
         "clash_mode": "global",
         "outbound": "GLOBAL"
       },
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[5]: 私有IP → 直连
+      // 192.168.x.x / 10.x.x.x / 172.16-31.x.x 全部直连
+      // 疑问: 为什么不放在最前面?
+      // 回答: DNS劫持(hijack-dns)和嗅探(sniff)必须最先执行
+      //       然后是面板模式(clash_mode), 面板优先级最高
+      //       私有IP放在这里合理 — 面板选了Global也要让
+      //       局域网能访问(在global规则之后)
+      // -------------------------------------------------------------------
       {
         "ip_is_private": true,
         "outbound": "DIRECT"
       },
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[6]: FakeIP段 → PROXY
+      // 所有FakeIP(198.18.0.0/15)强制走代理
+      // 疑问: 198.18.0.0/15是FakeIP段, 但FakeIP的域名
+      //       在DNS里已经标记为"走代理", 为什么还要路由规则?
+      // 回答: 双重保险。DNS规则说"这个域名用FakeIP"
+      //       路由规则说"FakeIP的IP段走PROXY"
+      //       两层保护确保不会漏
+      // -------------------------------------------------------------------
       {
-        "ip_cidr": ["198.18.0.0/15"],
+        "ip_cidr": [
+          "198.18.0.0/15"
+        ],
         "outbound": "PROXY"
       },
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[7]: 广告 → 拒绝连接
+      // 和DNS规则[3]形成双层拦截:
+      // DNS层: 广告域名→reject(App查DNS时就知道不通)
+      // 路由层: 广告IP→reject(即使绕过DNS, 连接也被拒)
+      // -------------------------------------------------------------------
       {
         "rule_set": [
           "geosite_adguard",
           "geosite-category-ads-all"
         ],
         "action": "reject"
+        // 疑问: route reject 和 dns reject 有什么区别?
+        // 回答: route reject 拒绝TCP/UDP连接
+        //       dns reject 拒绝DNS查询
+        //       双层拦截: DNS不答 + 连接不建 = 彻底屏蔽
       },
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[8]: 指定国内域名 → 直连
+      // Steam内容/知乎/京东/讯飞 — 这些在国内有服务器, 直连更快
+      // -------------------------------------------------------------------
       {
         "domain_suffix": [
-          "steamserver.net",                          // [!]
-          "zhihu.com",                                // [!]
-          "zhimg.com",                                // [!]
-          "jd.com",                                   // [!]
-          "360buyimg.com",                            // [!]
-          "xfyun.cn"                                  // [!]
+          "steamserver.net",
+          // [!] Steam内容CDN
+          "zhihu.com",
+          // [!] 知乎
+          "zhimg.com",
+          // [!] 知乎图片CDN
+          "jd.com",
+          // [!] 京东
+          "360buyimg.com",
+          // [!] 京东图片CDN
+          "xfyun.cn"
+          // [!] 讯飞(语音识别等)
         ],
         "outbound": "DIRECT"
       },
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[9]: 代理规则集 → PROXY
+      // 包含: Google全家桶 / Telegram IP / 机场proxy规则 / 游戏 / AI
+      // -------------------------------------------------------------------
       {
         "rule_set": [
           "geosite-google",
+          // Google域名合集(官方sing-geosite)
           "telegramip",
+          // Telegram服务器IP段(IP规则!)
+          // 疑问: 为什么要IP规则而不只是域名?
+          // 回答: Telegram有时直接用IP连接API服务器
+          //       域名规则匹配不到, 需要IP级匹配
           "proxy",
+          // 代理推荐分流(机场维护)
           "games",
+          // 游戏平台合集
           "ai"
+          // AI服务合集
         ],
         "outbound": "PROXY"
       },
 
-      // [*] 移动: resolve 从 cnip规则之后 → 移到 cnip规则之前
-      //     旧版: cnip在resolve前 → 域名未解析成IP → cnip永远无效
-      //     新版: 先resolve解析域名→IP → 再cnip匹配 → 中国IP直连生效
+      // -------------------------------------------------------------------
+      // 规则[10]: resolve — 解析域名为IP
+      // [*] 从cnip规则之后移到这里(关键修复!)
+      // 旧版: cnip在resolve前 → 域名没解析 → cnip永远无效
+      // 新版: resolve先执行 → IP已解析 → cnip能匹配
+      // -------------------------------------------------------------------
       {
         "action": "resolve"
+        // 用 default_domain_resolver(alidns_doh)解析域名→IP
+        // 然后重新从规则[6]开始匹配(跳过resolve之前的规则)
+        // 这次IP已就绪 → cnip能匹配了
       },
 
-      // (无变更, 但cnip现在能匹配了!)
+      // -------------------------------------------------------------------
+      // 规则[11]: 国内规则集 → DIRECT
+      // cnip现在能匹配了! (=中国IP直连生效!)
+      // -------------------------------------------------------------------
       {
         "rule_set": [
           "private",
+          // 私有/局域网IP
           "cn",
+          // 中国域名合集
           "cnip",
+          // 中国IP段合集 ← 关键!
+          // 只有经过resolve后, cnip才能匹配
           "microsoft-cn",
+          // 微软中国(Office/Windows更新走国内CDN)
           "apple-cn",
+          // 苹果中国(App Store/推送等)
           "google-cn",
+          // Google中国(极少, 主要是广告/统计)
           "games-cn",
+          // 国内游戏平台
           "networktest"
+          // 网络测速服务(国内)
         ],
         "outbound": "DIRECT"
       },
 
-      // (无变更)
+      // -------------------------------------------------------------------
+      // 规则[12]: 指定App包名 → 强制代理
+      // 无论域名/规则怎么分流, 这些App必须走代理
+      // 分析工具+嗅探后, 这里用域名匹配 → resolve后再到package_name
+      // 所以package_name在resolve之后
+      // 疑问: 为什么YouTube和Telegram要强制代理?
+      // 回答: 这两个App的某些连接可能不是通过标准端口/域名
+      //       强制指定确保不泄露到直连
+      // -------------------------------------------------------------------
       {
         "package_name": [
-          "com.google.android.youtube",               // [!]
-          "app.revanced.android.youtube",             // [!]
-          "org.telegram.messenger",                   // [!]
-          "org.telegram.messenger.beta"               // [!]
+          "com.google.android.youtube",
+          // [!] YouTube官方
+          "app.revanced.android.youtube",
+          // [!] YouTube Revanced(修改版)
+          "org.telegram.messenger",
+          // [!] Telegram
+          "org.telegram.messenger.beta"
+          // [!] Telegram Beta
         ],
         "outbound": "PROXY"
       }
+
+      // final: 所有未匹配的流量走 PROXY
     ],
 
-    // -------------------------------------------------------------------------
-    // 规则集 [*] download_detour: "PROXY" → "DIRECT"
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // 远程规则集(15个)
+    // 类型: binary(.srs) — 编译后的二进制规则集, 加载超快
+    // 来源: jsdelivr CDN(免费, 全球CDN, 国内可用)
+    // 更新: 每48小时自动更新
+    // =========================================================================
     "rule_set": [
       {
         "tag": "geosite-category-ads-all",
+        // GeoSite 广告分类(官方)
         "type": "remote",
+        // 远程下载
         "format": "binary",
+        // 二进制(.srs)格式, 比纯文本.json快10倍+
         "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*] 原 PROXY → DIRECT
+        // 疑问: 为什么改直连?
+        // 回答: 15个规则集同时走PROXY → 启动时代理连接数过多
+        //       http2 client connection force closed(被压断)
+        //       jsdelivr在国内有CDN节点, 直连通常可达
         "update_interval": "48h"
+        // 48小时更新一次
       },
       {
         "tag": "geosite_adguard",
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblocksingbox.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -704,7 +1269,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-google.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -712,7 +1278,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/proxy.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -720,7 +1287,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/games.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -728,7 +1296,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/ai.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -736,7 +1305,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/private.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -744,7 +1314,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/cn.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -752,7 +1323,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/microsoft-cn.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -760,7 +1332,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/apple-cn.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -768,7 +1341,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/google-cn.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -776,7 +1350,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/games-cn.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -784,7 +1359,8 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/networktest.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
@@ -792,24 +1368,37 @@
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/telegramip.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       },
       {
         "tag": "cnip",
+        // 中国IP段合集 — 最重要的规则集之一
+        // 需要resolve解析域名→IP后才能匹配
         "type": "remote",
         "format": "binary",
         "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/cnip.srs",
-        "download_detour": "DIRECT",                  // [*] 原 PROXY
+        "download_detour": "DIRECT",
+        // [*]
         "update_interval": "48h"
       }
     ],
 
     "final": "PROXY",
-    "auto_detect_interface": true
+    // 任何路由规则未匹配 → PROXY(代理)
+    // 疑问: 这是不是太重了? 国内网站也代理?
+    // 回答: 前面已有12条规则覆盖绝大多数情况
+    //       (本地域名、私有IP、中国域名/IP、广告...)
+    //       到final这一步的都是"规则集之外"的
+    //       走PROXY是最安全的选择
 
-    // [-] 删除: "sniff_override_destination":true  (1.13.x不存在于route顶层)
-    // [-] 删除: "sniff_timeout":"300ms"            (1.13.x不存在于route顶层)
+    "auto_detect_interface": true
+    // 自动检测手机的默认网络接口(WiFi还是蜂窝)
+    // 疑问: 这个和 network_type 有什么区别?
+    // 回答: auto_detect_interface 是底层: "手机现在用哪个网卡?"
+    //       network_type 是上层: "根据网卡类型选DNS"
+    //       必须开 auto_detect_interface 才能用 network_type
   },
 
   // =========================================================================
@@ -817,89 +1406,140 @@
   // =========================================================================
   "experimental": {
     "clash_api": {
+      // Clash API: 提供HTTP RESTful API, 兼容Clash面板
+      // 疑问: sing-box为什么要兼容Clash?
+      // 回答: Clash生态有大量成熟的面板(Web UI)
+      //       如 Yacd/MetaCubeXd/Dashboard
+      //       兼容API = 能直接用这些面板, 不用自己写
       "external_controller": "127.0.0.1:9090",
+      // 只监听本机, 不对外开放
       "external_ui": "ui",
+      // 面板文件存放目录(相对于配置目录)
       "external_ui_download_url": "https://cdn.jsdelivr.net/gh/MetaCubeX/metacubexd@gh-pages/metacubexd.zip",
+      // 自动下载 MetaCubeXd 面板(最流行的Clash面板之一)
       "external_ui_download_detour": "PROXY",
-      "secret": "屏蔽的Secret",                       // [!]
+      // 面板zip走代理下载
+      // 疑问: 规则集改DIRECT了, 为什么面板还走PROXY?
+      // 回答: 面板只下载一次, 失败率低
+      //       而且面板zip比较大, jsdelivr可能限速
+      //       走代理通常更快
+      "secret": "屏蔽的Secret",
+      // [!] API认证密钥
+      // 客户端需 HTTP头: Authorization: Bearer xxx
+      // 疑问: 只监听127.0.0.1, 还需要密码?
+      // 回答: 本机App(如浏览器)访问不需要密码
+      //       但某些情况下(端口转发等)其他人可能访问
+      //       密码多一层保障
       "default_mode": "rule"
+      // 面板默认显示"规则模式"
+      // 对应 clash_mode: rule
+      // 可选: rule / direct / global
     },
     "cache_file": {
+      // 缓存持久化: 重启后保留FakeIP映射和DNS拒绝记录
       "enabled": true,
       "path": "cache.db",
-      "cache_id": "屏蔽的ID",                         // [!]
+      // SQLite数据库文件
+      "cache_id": "屏蔽的ID",
+      // [!] 缓存标识
+      // 疑问: cache_id做什么?
+      // 回答: 区分不同配置的缓存
+      //       切换配置时旧缓存不会污染新配置
       "store_fakeip": true,
-
-      // [+] 新增: 缓存DNS拒绝结果(广告域名), 重启后广告拦截即时生效
+      // 保存FakeIP → 域名映射
+      // 重启后不需要重新建立FakeIP映射表
       "store_rdrc": true,
-
-      // [+] 新增: 7天过期
+      // [+] 新增: 保存DNS拒绝缓存
+      // 疑问: RDRC是什么?
+      // 回答: Rejected DNS Response Cache
+      //       记住"哪些域名被DNS规则reject了"
+      //       重启后广告拦截即时生效, 不需要重新查询
+      //       否则重启后要重新走一遍DNS规则才能拦截广告
       "rdrc_timeout": "7d"
+      // [+] 新增: 7天后过期
+      // 广告域名会变化, 定期过期保证准确
     }
   }
 }
 
 
 // ============================================================================
-// 变更总结
+// 附录A: 变更清单
 // ============================================================================
 
-// [+] 新增 (6项):
-//   dns.servers:       alidns_doh + alidns_quic + dnspod_doh + dnspod_quic + cfdns_doh
-//   dns.rules:         蜂窝→dnspod_quic / WiFi→alidns_doh 分流
-//   dns.client_subnet: 告知CDN用户网段
-//   inbound.tun:       udp_timeout:30s (省电)
-//   outbound.pkpk01~05: tcp_fast_open:true (重连加速)
-//   cache_file:        store_rdrc + rdrc_timeout (广告缓存)
+// 新增 (6项):
+//  [+] DNS服务器:   alidns_doh + alidns_quic + dnspod_doh + dnspod_quic + cfdns_doh
+//  [+] DNS规则:     蜂窝→dnspod_quic / WiFi→alidns_doh
+//  [+] DNS全局:     client_subnet:"xxx/24"
+//  [+] TUN入站:     udp_timeout:"30s"
+//  [+] 出站:        pkpk01~05 tcp_fast_open:true
+//  [+] 缓存:        store_rdrc:true + rdrc_timeout:"7d"
 
-// [-] 删除 (3项):
-//   route.rules:       cellular→DIRECT (4G全局直连, 导致代理失效)
-//   inbound.tun:       sniff_timeout / sniff_override_destination (1.13.0已废弃)
-//   route顶层:          sniff_override_destination / sniff_timeout (不存在)
+// 删除 (3项):
+//  [-] 路由规则:    cellular→DIRECT(4G全直连 → 代理失效)
+//  [-] TUN入站:     sniff_timeout / sniff_override_destination(1.13.0废弃)
+//  [-] 路由顶层:    sniff_override_destination / sniff_timeout(不存在)
 
-// [*] 修改 (6项):
-//   log.level:           trace → info
-//   dns.cache_capacity:  8000 → 65536
-//   dns.servers:         DoH URL完整格式 → 纯主机名 + domain_resolver
-//   dns.rules[节点]:     占位符 → 真实后缀全覆盖
-//   route.rules:         resolve 移到 cnip 之前
-//   route.rule_set:      download_detour PROXY → DIRECT
-//   outbound.pkpk01:     max_connections→max_streams, 去enabled, 加padding
+// 修改 (6项):
+//  [*] 日志:        trace → info
+//  [*] DNS缓存:     8000 → 65536
+//  [*] DNS DoH:     完整URL → 纯主机名 + domain_resolver
+//  [*] DNS节点:     占位符"节点域名" → 真实后缀全覆盖
+//  [*] 路由:        resolve移到cnip前
+//  [*] 规则集:      download_detour PROXY → DIRECT
+//  [*] pkpk01:      max_connections→max_streams, 去enabled, 加padding
+
 
 // ============================================================================
-// 启动错误 & 修复
+// 附录B: 启动错误排障
 // ============================================================================
 
 // 错误1: "missing domain resolver for domain server address"
-//   → DNS域名型加 domain_resolver:"alidns_quic"
+//   原因: 域名型DNS(alidns_doh等)没有指定解析自身的DNS
+//   修复: 所有域名型DNS加 domain_resolver:"alidns_quic"
 
-// 错误2: "parse 'https://https:%2F%2F...': invalid port"
-//   → type:"https" 的 server 去掉 https:// 前缀和 /dns-query
+// 错误2: "parse 'https:%2F%2F...': invalid port"
+//   原因: type:"https"的server写了https://前缀 → 双重编码
+//   修复: server只写主机名(sing-box自动补全)
 
 // 错误3: "legacy inbound fields deprecated in 1.11.0, removed in 1.13.0"
-//   → TUN入站删 sniff_timeout / sniff_override_destination
+//   原因: TUN入站有sniff_timeout / sniff_override_destination
+//   修复: 删除这两个字段(sniff改为route.rules action:"sniff")
 
-// 错误4: "json: unknown field" (route顶层 sniff_override_destination)
-//   → 该字段在1.13.x不存在于route顶层, 删除
+// 错误4: "json: unknown field"
+//   原因: route顶层有 sniff_override_destination / sniff_timeout
+//         (这些字段不存在于1.13.x的route顶层)
+//   修复: 删除
 
 // 错误5: "http2: client connection force closed"
-//   → 规则集 download_detour 改 DIRECT(jsdelivr国内CDN直连)
+//   原因: 15个规则集同时走PROXY下载 → 并发连接被压断
+//   修复: download_detour改为DIRECT, jsdelivr CDN国内可达
 
 // 错误6: pkpk01新配置不通
-//   → multiplex 去掉 enabled:true(reality不兼容h2mux)
+//   原因: multiplex加了enabled:true → reality不兼容h2mux
+//   修复: 去掉enabled(恢复禁用)
+
 
 // ============================================================================
-// 关键规则速查
+// 附录C: 关键规则速查
 // ============================================================================
 
 // DNS:
-//   type:"https" → server 只填主机名(不带协议和路径)
-//   域名型DNS  → 必须加 domain_resolver 链
+//   type:"https"  → server 只填主机名(不要https:// /dns-query)
+//   域名型DNS     → 必加 domain_resolver 指向IP型DNS
+//   FakeIP        → 零延迟, 但只能用于需要代理的域名
 
 // 路由:
-//   resolve  → 放在IP规则集(cnip)之前(先解析域名→IP再匹配)
-//   sniff   → 1.13.0只用 route.rules action:"sniff", 不在入站
+//   resolve       → 放在IP规则集(cnip)之前
+//   sniff         → 1.13.0 = route.rules action:"sniff"(不在入站)
+//   规则顺序      → 从上到下第一条命中即停, 顺序至关重要
 
 // 节点:
-//   reality VLESS → multiplex 不加 enabled(不兼容h2mux)
-//   WS VLESS     → multiplex enabled:true 正常
+//   reality VLESS → multiplex 不加 enabled
+//   WS VLESS      → multiplex enabled:true 正常
+//   Naive         → 无 multiplex, 无 tcp_fast_open
+
+// 三网优化:
+//   WiFi   → alidns_doh (阿里DoH加密)
+//   蜂窝   → dnspod_quic (腾讯UDP低延迟)
+//   国外   → ggdns_doh (Google DoH经代理, cfdns_doh备用)
