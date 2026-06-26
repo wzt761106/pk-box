@@ -1,0 +1,592 @@
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │                       Sing‑Box 完整配置 (带详细注释)                          │
+// └─────────────────────────────────────────────────────────────────────────────┘
+{
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 日志配置：控制程序运行时的日志输出级别与格式
+  // ══════════════════════════════════════════════════════════════════════════════
+  "log": {
+    "level": "fatal", // 日志级别：fatal(只记录导致程序退出的严重错误)，可用：trace/debug/info/warn/error/fatal/panic
+    "timestamp": true // 是否在日志行前显示时间戳，方便定位问题发生的时间
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // DNS 配置：域名解析策略、服务器与规则，直接影响流量分流
+  // ══════════════════════════════════════════════════════════════════════════════
+  "dns": {
+    // --- DNS 服务器列表 ---
+    "servers": [
+      {
+        "type": "local", // 使用系统本地 DNS 服务器
+        "tag": "local"   // 服务器标签，供规则引用
+      },
+      {
+        "type": "fakeip",              // FakeIP 模式：返回虚拟 IP，配合路由将流量导向代理
+        "tag": "fakeip",               // 标签
+        "inet4_range": "198.18.0.0/15" // FakeIP 分配的 IPv4 地址段，需与路由中 ip_cidr 匹配
+      },
+      {
+        "type": "https",               // DNS over HTTPS，加密查询
+        "tag": "ggdns",                // 标签
+        "detour": "proxy",             // 通过代理出站(proxy)发送 DNS 查询，防止本地 DNS 泄露
+        "domain_resolver": "local",    // 解析 DoH 服务器域名(google)时使用 local 服务器，避免循环依赖
+        "server": "dns.google"         // Google 公共 DoH 服务
+      }
+    ],
+
+    // --- DNS 规则：按顺序匹配，命中即停止 ---
+    "rules": [
+      {
+        "rule_set": [               // 引用的规则集列表，包含国内/私有/微软/苹果/谷歌中国/游戏/测速等域名
+          "cn",
+          "private",
+          "microsoft-cn",
+          "apple-cn",
+          "google-cn",
+          "games-cn",
+          "networktest"
+        ],
+        "server": "local"           // 命中这些规则集的域名使用本地 DNS 解析，获取真实 IP，确保直连
+      },
+      {
+        "rule_set": [               // 广告过滤规则集
+          "geosite_adguard",
+          "geosite-category-ads-all",
+          "ads-extra"
+        ],
+        "action": "reject"          // 直接拒绝解析，返回空结果，屏蔽广告
+      },
+      {
+        "ip_version": 6,            // 匹配所有 AAAA 查询 (IPv6)
+        "action": "reject"          // 禁用 IPv6 解析，仅保留 IPv4，避免 IPv6 优先导致的问题
+      },
+      {
+        "query_type": [             // 特定 DNS 记录类型
+          "SVCB",                   // HTTPS/SVCB 记录，常用于 ECH，可能泄露 SNI
+          "HTTPS",
+          "PTR"                     // 反向查询，一般无用且可能泄露隐私
+        ],
+        "action": "reject"          // 直接拒绝这些类型的查询
+      },
+      {
+        "query_type": [             // 只允许 A 和 AAAA 查询
+          "A",
+          "AAAA"
+        ],
+        "invert": true,             // 反转匹配，即除了 A/AAAA 之外的类型
+        "action": "reject"          // 全部拒绝，减少无用 DNS 流量
+      },
+      {
+        "rule_set": [               // 需要代理的规则集
+          "geosite-google",
+          "geosite-youtube",
+          "geosite-instagram",
+          "proxy",
+          "games",
+          "ai",
+          "gfw",
+          "global-media",
+          "google-sns",
+          "android-sys"
+        ],
+        "server": "fakeip",         // 使用 FakeIP 服务器，返回虚拟 IP，后续路由到代理
+        "rewrite_ttl": 300          // 重写 TTL 为 300 秒，避免 DNS 缓存过久导致 IP 失效
+      },
+      {
+        "rule_set": "fakeip-filter",// FakeIP 过滤规则集：这些域名即使走代理也应使用真实 DNS
+        "server": "local"           // 使用本地 DNS 解析，例如部分需直连的 CDN 或验证服务
+      },
+      {
+        "clash_mode": "direct",     // 当 Clash 模式切换为“直连”时
+        "server": "local"           // 所有域名都用本地 DNS 解析
+      },
+      {
+        "clash_mode": "global",     // 当 Clash 模式切换为“全局”时
+        "server": "fakeip"          // 所有域名都用 FakeIP，全部走代理
+      }
+    ],
+
+    "final": "ggdns",             // 未匹配任何规则的域名，最终使用 Google DoH 解析 (防止 DNS 污染)
+    "reverse_mapping": true,      // 启用反向映射，从 FakeIP 查询真实域名，用于日志/面板显示
+    "strategy": "ipv4_only",      // DNS 解析策略：只请求 A 记录 (IPv4)，与上面拒绝 IPv6 保持一致
+    "cache_capacity": 65536       // DNS 缓存条目上限，减少重复查询
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // NTP 时间同步：确保系统时间准确，避免证书验证失败等问题
+  // ══════════════════════════════════════════════════════════════════════════════
+  "ntp": {
+    "enabled": true,                  // 开启 NTP 同步
+    "interval": "30m0s",              // 每 30 分钟同步一次
+    "server": "ntp.aliyun.com",       // 使用阿里云 NTP 服务器，国内延迟低
+    "server_port": 123                // NTP 标准端口
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 入站配置：定义流量如何进入 Sing-Box
+  // ══════════════════════════════════════════════════════════════════════════════
+  "inbounds": [
+    {
+      "type": "tun",                      // TUN 模式，创建虚拟网卡接管所有流量
+      "tag": "tun-in",                    // 入站标签
+      "mtu": 1500,                        // 最大传输单元，标准以太网值
+      "address": "10.8.0.1/24",           // TUN 接口的 IP 地址段
+      "auto_route": true,                 // 自动设置系统路由，使流量经过 TUN
+      "strict_route": true,               // 严格路由，避免路由泄露
+      "udp_timeout": "5m0s",              // UDP 会话超时时间，5 分钟无数据则清理
+      "stack": "mixed",                   // 网络栈模式：mixed 兼容 IPv4/v6 双栈
+      "endpoint_independent_nat": true    // 启用端点独立 NAT，增强 UDP 穿透能力
+    }
+  ],
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 出站配置：定义流量如何从 Sing-Box 发出
+  // ══════════════════════════════════════════════════════════════════════════════
+  "outbounds": [
+    {
+      "type": "direct",       // 直接连接，不经过代理
+      "tag": "DIRECT"         // 标签，供路由规则和策略引用
+    },
+    {
+      "type": "selector",     // 手动选择器，可在面板中切换节点
+      "tag": "proxy",         // 代理选择器的标签，路由中“proxy”指此出站
+      "outbounds": [          // 可选的出站列表，第一个为默认
+        "AUTO",               // 自动测速选优
+        "节点名称",            // 占位符：实际节点标签，需替换为你的机场/自建节点标签
+        "DIRECT"              // 也可选直连，紧急情况下绕过代理
+      ],
+      "default": "AUTO"       // 默认使用 AUTO 自动选择
+    },
+    {
+      "type": "urltest",      // 自动测速选择器：周期性测试延迟，选最优节点
+      "tag": "AUTO",          // 标签，被 proxy 选择器引用
+      "outbounds": [          // 参与测速的节点列表
+        "节点名称"             // 占位符，需替换为实际节点标签，可添加多个
+      ],
+      "url": "http://cp.cloudflare.com/", // 测速用 URL，Cloudflare 测速地址，稳定且全球节点多
+      "interval": "10m0s",               // 每 10 分钟测速一次
+      "idle_timeout": "30m0s"            // 若 30 分钟内无流量，则释放连接资源
+    },
+    {
+      "type": "selector",     // 全局模式选择器，供 clash_mode global 使用
+      "tag": "GLOBAL",
+      "outbounds": [
+        "proxy",              // 全局走代理
+        "DIRECT"              // 也可全局直连，适合需求切换
+      ],
+      "default": "proxy"      // 默认全局代理
+    },
+    {
+      "type": "selector",     // 国内流量出站选择器，供 CN 规则使用
+      "tag": "CN",
+      "outbounds": [
+        "DIRECT",             // 默认直连
+        "proxy"               // 特殊情况可切换为代理
+      ],
+      "default": "DIRECT"
+    }
+    // ⚠️ 节点配置区域：请在此处插入你所有的服务器节点配置，如 vmess/trojan/shadowsocks 等
+    // 示例：
+    // ,{
+    //   "type": "vmess",
+    //   "tag": "节点名称",
+    //   "server": "你的服务器地址",
+    //   "server_port": 443,
+    //   "uuid": "你的UUID",
+    //   "security": "auto",
+    //   "alter_id": 0,
+    //   "transport": {
+    //     "type": "ws",
+    //     "path": "/yourpath"
+    //   }
+    // }
+  ],
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 路由配置：核心流量调度规则，决定每个请求走向哪个出站
+  // ══════════════════════════════════════════════════════════════════════════════
+  "route": {
+    "rules": [
+      // --- 必须放在最前面的嗅探规则 ---
+      {
+        "action": "sniff"    // 尝试嗅探域名 (从 TLS/HTTP 流量中)，使路由更准确
+      },
+      // --- DNS 流量劫持到内置 DNS 模块 ---
+      {
+        "type": "logical",          // 逻辑组合规则
+        "mode": "or",               // “或”逻辑，满足任一子规则即匹配
+        "rules": [
+          {
+            "port": 53              // 目标端口 53 (标准 DNS)
+          },
+          {
+            "protocol": "dns"       // 或者流量协议标识为 DNS
+          }
+        ],
+        "action": "hijack-dns"      // 劫持 DNS 流量到内部 DNS 服务器处理
+      },
+      // --- 阻断 QUIC 协议，强制回退 TCP，便于分流与控制 ---
+      {
+        "protocol": "quic",         // 匹配 QUIC 协议
+        "action": "reject"          // 直接拒绝，浏览器/应用会回退到 TCP/HTTP2
+      },
+      // --- Clash 模式切换路由 ---
+      {
+        "clash_mode": "direct",     // 当 Clash 面板切换到“直连”模式
+        "outbound": "DIRECT"        // 全部流量走 DIRECT 出站
+      },
+      {
+        "clash_mode": "global",     // 当 Clash 面板切换到“全局”模式
+        "outbound": "GLOBAL"        // 走 GLOBAL 选择器(默认代理)
+      },
+      // --- 禁用 IPv6 路由 ---
+      {
+        "ip_version": 6,            // 匹配 IPv6 地址
+        "action": "reject"          // 直接拒绝，防止 IPv6 泄露或绕过分流
+      },
+      // --- 私有 IP 直连 ---
+      {
+        "ip_is_private": true,      // 目标 IP 为私有地址 (局域网)
+        "outbound": "DIRECT"        // 直连，保证内网服务可访问
+      },
+      // --- 阻断非标准 DNS 端口，防止 DNS 泄露 ---
+      {
+        "port": [                   // 目标端口
+          853,                      // DNS over TLS
+          5353                      // mDNS (多播 DNS)
+        ],
+        "action": "reject"          // 阻断这些端口的流量，统一走内建 DNS
+      },
+      // --- FakeIP 地址段走代理 ---
+      {
+        "ip_cidr": "198.18.0.0/15", // 匹配 FakeIP 分配的 IP 段
+        "outbound": "proxy"         // 导向代理出站，实现“无感知”代理
+      },
+      // --- 小米系统 API 直连，避免因代理导致更新/服务异常 ---
+      {
+        "domain_suffix": "api.sec.miui.com", // 小米安全 API
+        "outbound": "DIRECT"
+      },
+      // --- 广告/欺诈域名屏蔽 ---
+      {
+        "rule_set": [               // 集合包含多种广告过滤规则
+          "geosite_adguard",
+          "geosite-category-ads-all",
+          "ads-extra",
+          "anti_fraud"              // 反欺诈规则
+        ],
+        "action": "reject"          // 拒绝连接，节省流量并提升浏览体验
+      },
+      // --- 代理规则集：命中这些域名/地址则走代理 ---
+      {
+        "rule_set": [
+          "geosite-google",         // Google 服务
+          "geosite-youtube",        // YouTube
+          "geosite-instagram",      // Instagram
+          "telegram",               // Telegram 域名规则
+          "telegramip",             // Telegram IP 规则
+          "proxy",                  // 通用代理规则 (被墙网站)
+          "gfw",                    // GFW 列表
+          "global-media",           // 全球流媒体
+          "google-sns",             // Google 推送服务 (FCM 相关)
+          "games",                  // 游戏平台
+          "ai",                     // AI 服务 (如 ChatGPT)
+          "fcm",                    // Firebase Cloud Messaging
+          "android-sys"             // Android 系统服务 (如 time.android.com)
+        ],
+        "outbound": "proxy"         // 导向 proxy 选择器，通过代理访问
+      },
+      // --- 阻断 STUN/DTLS 等 WebRTC 相关协议，防止 IP 泄露 ---
+      {
+        "protocol": [               // 协议名称
+          "stun",                   // Session Traversal Utilities for NAT
+          "dtls"                    // Datagram TLS (WebRTC 数据加密)
+        ],
+        "action": "reject"          // 阻断，避免泄露真实 IP
+      },
+      // --- 进一步阻断 STUN/TURN 服务器端口与关键词 ---
+      {
+        "type": "logical",
+        "mode": "or",
+        "rules": [
+          {
+            "network": "udp",       // UDP 流量
+            "port": [               // 常见 STUN/TURN 端口
+              3478,
+              5349,
+              19302
+            ]
+          },
+          {
+            "domain_keyword": [     // 域名包含 stun 或 turn 关键词
+              "stun",
+              "turn"
+            ]
+          }
+        ],
+        "action": "reject"
+      },
+      // --- 解析域名，确保后续 ip 规则能正确匹配 ---
+      {
+        "action": "resolve"         // 将域名解析为 IP 后再进行后续规则匹配
+      },
+      // --- 国内/常用服务直连 ---
+      {
+        "rule_set": [
+          "private",                // 私有网络
+          "cn",                     // 中国域名
+          "microsoft-cn",           // 微软中国服务
+          "apple-cn",               // 苹果中国服务
+          "google-cn",              // 谷歌中国服务
+          "games-cn",               // 国内游戏平台
+          "networktest"             // 网络测试(如 speedtest 中国节点)
+        ],
+        "outbound": "CN"            // 走 CN 选择器 (默认 DIRECT)，可手动切 proxy
+      },
+      // --- 国内 IP 直连 ---
+      {
+        "rule_set": "cnip",         // 中国 IP 地址集合
+        "outbound": "CN"            // 同样走 CN 选择器
+      },
+      // --- 特定 App 包名强制走代理 ---
+      {
+        "package_name": [           // Android 应用包名，仅 TUN 模式且开启包名探测时有效
+          "com.google.android.youtube",          // 官方 YouTube
+          "app.revanced.android.youtube",        // YouTube ReVanced
+          "org.telegram.messenger",              // Telegram
+          "org.telegram.messenger.beta",
+          "com.twitter.android",                 // Twitter
+          "com.zhiliaoapp.musically",            // TikTok
+          "com.zhiliaoapp.musically.go",
+          "com.discord",                         // Discord
+          "com.reddit.frontpage",                // Reddit
+          "com.spotify.music",                   // Spotify
+          "tv.twitch.android.app"                // Twitch
+        ],
+        "outbound": "proxy"         // 这些应用强制走代理
+      }
+    ],
+
+    // --- 规则集定义：从远程加载，定期更新 ---
+    "rule_set": [
+      {
+        "type": "remote",                                                         // 远程规则集
+        "tag": "geosite-category-ads-all",                                        // 标签名
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-category-ads-all.srs", // 规则集地址
+        "download_detour": "DIRECT",                                              // 下载走直连，防止死循环
+        "update_interval": "48h0m0s"                                              // 每 48 小时更新
+      },
+      {
+        "type": "remote",
+        "tag": "geosite_adguard",
+        "url": "https://cdn.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblocksingbox.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-google",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-google.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "proxy",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/proxy.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "games",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/games.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "ai",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/ai.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "private",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/private.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/cn.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "microsoft-cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/microsoft-cn.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "apple-cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/apple-cn.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "google-cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/google-cn.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "games-cn",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/games-cn.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "networktest",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/networktest.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "telegramip",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/telegramip.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "cnip",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/cnip.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-youtube",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-youtube.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "telegram",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-telegram.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "gfw",
+        "url": "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/gfw.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "fcm",
+        "url": "https://cdn.jsdelivr.net/gh/senshinya/singbox_ruleset@main/rule/GoogleFCM/GoogleFCM.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "anti_fraud",
+        "url": "https://cdn.jsdelivr.net/gh/hwsaya/nothing@main/rules/FuckFZ.json",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "fakeip-filter",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/fakeip-filter.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "geosite-instagram",
+        "url": "https://cdn.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-instagram.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "global-media",
+        "url": "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-entertainment.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "google-sns",
+        "url": "https://cdn.jsdelivr.net/gh/senshinya/singbox_ruleset@main/rule/Google/Google.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "android-sys",
+        "url": "https://cdn.jsdelivr.net/gh/senshinya/singbox_ruleset@main/rule/Android/Android.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      },
+      {
+        "type": "remote",
+        "tag": "ads-extra",
+        "url": "https://cdn.jsdelivr.net/gh/DustinWin/ruleset_geodata@sing-box-ruleset/ads.srs",
+        "download_detour": "DIRECT",
+        "update_interval": "48h0m0s"
+      }
+    ],
+
+    "final": "proxy",                   // 未匹配任何规则的流量默认走代理 (安全策略，避免漏网)
+    "auto_detect_interface": true,      // 自动检测网络接口，多网络环境友好
+    "default_domain_resolver": "local"  // 路由决策中需要解析域名时默认使用 local DNS
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 实验性功能：缓存文件与 Clash API 控制面板
+  // ══════════════════════════════════════════════════════════════════════════════
+  "experimental": {
+    "cache_file": {
+      "enabled": true,               // 启用缓存，加速重启后规则加载和 FakeIP 维持
+      "path": "cache.db",            // 缓存文件路径
+      "cache_id": "cinchov",         // 缓存标识，区分不同实例
+      "store_fakeip": true,          // 存储 FakeIP 映射，重启后保留域名-IP关系
+      "store_rdrc": true,            // 存储 DNS 缓存，减少启动时解析延迟
+      "rdrc_timeout": "168h0m0s"     // DNS 缓存超时：7 天
+    },
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",                          // API 监听地址，供面板连接
+      "external_ui": "ui",                                               // 本地面板文件目录
+      "external_ui_download_url": "https://github.com/MetaCubeX/metacubexd/archive/gh-pages.zip", // 面板自动下载地址
+      "external_ui_download_detour": "DIRECT",                           // 下载面板走直连
+      "secret": "kSDuU2WHyf72taGMdDS0ib6klwFVF5QIM4HGhS5f4Jw=",        // API 认证密钥 (需妥善保管)
+      "default_mode": "rule"                                             // 默认面板模式为“规则”
+    }
+  }
+}
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 总结与疑惑：                                                                 │
+// │ 1. DNS 策略：通过 fakeip 分流，减少 DNS 泄露，但部分服务可能需要真实 IP (如    │
+// │    Netflix 检测)，fakeip-filter 规则集尝试解决。                              │
+// │ 2. IPv6 完全禁用：若未来环境需要 IPv6，需移除相关拒绝规则。                    │
+// │ 3. QUIC 阻断：可能影响部分网站加载速度或功能，但增强了分流控制。               │
+// │ 4. 规则集来源：依赖多个 GitHub 仓库，需保证网络可直连下载，否则更新失败。       │
+// │ 5. 安全：secret 已暴露，生产环境请重新生成强密码。                             │
+// │ 6. 节点配置：需自行替换“节点名称”为实际出站标签，并添加完整协议配置。           │
+// └─────────────────────────────────────────────────────────────────────────────┘
